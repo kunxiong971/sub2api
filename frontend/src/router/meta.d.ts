@@ -64,5 +64,11 @@ declare module 'vue-router' {
      * i18n key for the page description
      */
     descriptionKey?: string
+
+    /**
+     * 集成工作台类型（PlaygroundView 共用壳页面使用）
+     * 可选值: 'chat' | 'image' | 'canvas'
+     */
+    app?: 'chat' | 'image' | 'canvas'
   }
 }

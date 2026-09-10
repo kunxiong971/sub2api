@@ -77,6 +77,8 @@ func RegisterUserRoutes(
 		{
 			keys.GET("", h.APIKey.List)
 			keys.GET("/:id", h.APIKey.GetByID)
+			// 集成工作台（对话/生图/画布）配置：用户可用分组 + 每组一把专用 key
+			keys.GET("/playground-config", h.APIKey.GetPlaygroundConfig)
 			keys.POST("", h.APIKey.Create)
 			keys.PUT("/:id", h.APIKey.Update)
 			keys.DELETE("/:id", h.APIKey.Delete)

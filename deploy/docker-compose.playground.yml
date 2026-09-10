@@ -1,0 +1,106 @@
+# =============================================================================
+# Sub2API 集成工作台 - Playground 附加服务
+# =============================================================================
+# 为 C 端集成工作台提供三个应用的容器（配合 deploy/Caddyfile 的子域名反代使用）：
+#   - lobehub (lobe-chat v2)  : AI 对话        → chat.<域名>   (localhost:3210)
+#   - infinite-canvas         : 无限画布        → canvas.<域名> (localhost:3000)
+#   - gpt_image_playground    : 生图工作台      → 纯静态产物，无需容器，
+#                               在宿主机 `npm ci && npm run build` 后把 dist/
+#                               拷到 /var/www/image-app/ 由 Caddy 直接托管。
+#
+# 用法：
+#   1. 在本文件同目录创建 .env.playground（或直接编辑下方 environment）
+#   2. docker-compose -f docker-compose.playground.yml up -d
+#
+# 注意：lobehub 使用独立 Postgres（ParadeDB pg17，自带 pgvector/pg_search，
+#       启动时自动迁移）。请勿复用 sub2api 的数据库。
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # LobeHub 专用 PostgreSQL（ParadeDB pg17：RAG/知识库所需的向量与全文检索插件）
+  # ===========================================================================
+  lobehub-postgres:
+    image: paradedb/paradedb:latest-pg17
+    container_name: lobehub-postgres
+    restart: unless-stopped
+    command: -c shared_preload_libraries=pg_search
+    environment:
+      - POSTGRES_USER=${LOBEHUB_DB_USER:-lobehub}
+      - POSTGRES_PASSWORD=${LOBEHUB_DB_PASSWORD:?LOBEHUB_DB_PASSWORD is required}
+      - POSTGRES_DB=${LOBEHUB_DB_NAME:-lobehub}
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - lobehub_pg_data:/var/lib/postgresql/data
+    networks:
+      - playground
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LOBEHUB_DB_USER:-lobehub}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================================================
+  # LobeHub（lobe-chat v2，Better Auth 认证）
+  # 密钥生成方式：
+  #   KEY_VAULTS_SECRET / AUTH_SECRET : openssl rand -base64 32
+  #   JWKS_KEY                        : 参考 LobeHub 官方文档生成 JWKS JSON
+  #                                     （https://lobehub.com/zh/docs/self-hosting/platform/docker）
+  # S3 为文件上传/知识库所需（如 Cloudflare R2），纯对话可先留空观察日志。
+  # ===========================================================================
+  lobehub:
+    image: lobehub/lobehub:latest
+    container_name: lobehub
+    restart: unless-stopped
+    ports:
+      # 仅绑定本机回环，由宿主机 Caddy 反代到 chat.<域名>
+      - "127.0.0.1:3210:3210"
+    depends_on:
+      lobehub-postgres:
+        condition: service_healthy
+    environment:
+      - APP_URL=${LOBEHUB_APP_URL:?LOBEHUB_APP_URL is required，如 https://chat.example.com}
+      - DATABASE_URL=postgres://${LOBEHUB_DB_USER:-lobehub}:${LOBEHUB_DB_PASSWORD}@lobehub-postgres:5432/${LOBEHUB_DB_NAME:-lobehub}
+      - KEY_VAULTS_SECRET=${LOBEHUB_KEY_VAULTS_SECRET:?LOBEHUB_KEY_VAULTS_SECRET is required}
+      - AUTH_SECRET=${LOBEHUB_AUTH_SECRET:?LOBEHUB_AUTH_SECRET is required}
+      - JWKS_KEY=${LOBEHUB_JWKS_KEY:-}
+      - TZ=${TZ:-Asia/Shanghai}
+      # ---- S3 对象存储（文件上传/知识库，选填）----
+      - S3_ACCESS_KEY_ID=${LOBEHUB_S3_ACCESS_KEY_ID:-}
+      - S3_SECRET_ACCESS_KEY=${LOBEHUB_S3_SECRET_ACCESS_KEY:-}
+      - S3_ENDPOINT=${LOBEHUB_S3_ENDPOINT:-}
+      - S3_BUCKET=${LOBEHUB_S3_BUCKET:-}
+      - S3_REGION=${LOBEHUB_S3_REGION:-}
+    networks:
+      - playground
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -T 5 -O /dev/null http://localhost:3210/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ===========================================================================
+  # 无限画布（infinite-canvas）
+  # 前置：把 infinite-canvas 仓库克隆/上传到与本 compose 同级的 ./infinite-canvas 目录，
+  #       或改为指向你已推送到镜像仓库的镜像（如 ghcr.io/<you>/infinite-canvas:xxx）。
+  # ===========================================================================
+  infinite-canvas:
+    build:
+      context: ../infinite-canvas
+      dockerfile: Dockerfile
+    image: local/infinite-canvas:latest
+    container_name: infinite-canvas
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - playground
+
+networks:
+  playground:
+    driver: bridge
+
+volumes:
+  lobehub_pg_data:
+    driver: local

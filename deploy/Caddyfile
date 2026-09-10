@@ -110,3 +110,40 @@ api.sub2api.com {
 		respond "{err.status_code} {err.status_text}"
 	}
 }
+
+# =============================================================================
+# 集成工作台（fork 二开：C 端对话 / 生图 / 画布）— 子域名反代示例
+# =============================================================================
+# 说明：lobe-chat v2 (LobeHub) 不支持 Next.js basePath，无法挂子路径，
+#       统一采用「子域名」方案。三个容器由 deploy/docker-compose.playground.yml 提供。
+# 使用方法：把 example.com 替换为你的根域名，取消注释，`caddy reload` 即可。
+#
+# ---- AI 对话（lobehub/lobehub，容器端口 3210）----
+# chat.example.com {
+# 	reverse_proxy localhost:3210 {
+# 		header_up X-Forwarded-Proto {scheme}
+# 		header_up X-Forwarded-Host {host}
+# 	}
+# 	encode zstd gzip
+# }
+#
+# ---- 生图工作台（gpt_image_playground 构建产物为纯静态文件）----
+# 构建并部署：cd gpt_image_playground && npm ci && npm run build
+#             然后把 dist/ 拷贝到 /var/www/image-app/
+# image.example.com {
+# 	root * /var/www/image-app
+# 	try_files {path} /index.html
+# 	file_server
+# 	encode zstd gzip
+# }
+#
+# ---- 无限画布（infinite-canvas，容器端口 3000）----
+# canvas.example.com {
+# 	reverse_proxy localhost:3000 {
+# 		header_up X-Forwarded-Proto {scheme}
+# 		header_up X-Forwarded-Host {host}
+# 	}
+# 	encode zstd gzip
+# }
+# =============================================================================
+

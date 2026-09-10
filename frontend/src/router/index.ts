@@ -228,6 +228,40 @@ const routes: RouteRecordRaw[] = [
       descriptionKey: 'batchImageGuide.description'
     }
   },
+  // ==================== 集成工作台（壳页面 + iframe + key 注入） ====================
+  {
+    path: '/chat',
+    name: 'PlaygroundChat',
+    component: () => import('@/views/user/PlaygroundView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'AI Chat',
+      app: 'chat'
+    }
+  },
+  {
+    path: '/image',
+    name: 'PlaygroundImage',
+    component: () => import('@/views/user/PlaygroundView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Image Studio',
+      app: 'image'
+    }
+  },
+  {
+    path: '/canvas',
+    name: 'PlaygroundCanvas',
+    component: () => import('@/views/user/PlaygroundView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Infinite Canvas',
+      app: 'canvas'
+    }
+  },
   {
     path: '/usage',
     name: 'Usage',
