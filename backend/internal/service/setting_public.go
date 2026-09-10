@@ -771,6 +771,17 @@ func safeRawJSONArray(raw string) json.RawMessage {
 
 // GetFrameSrcOrigins returns deduplicated http(s) origins from home_content URL,
 // purchase_subscription_url, and all custom_menu_items URLs. Used by the router layer for CSP frame-src injection.
+//
+// fork(sub2api): 另外固定注入「集成工作台」三个内置壳页面（/chat、/image、/canvas）
+// 通过 iframe 嵌入的子域名来源。它们不走 custom_menu_items，若不在这里放行，
+// 主站 CSP 的 frame-src 会直接拦截 iframe（浏览器连请求都不会发出）。
+// 域名需与 frontend/src/config/playground.ts 的 DEPLOY_BASES 保持一致。
+var playgroundFrameSrcOrigins = []string{
+	"https://chat.ai.1canc.com",
+	"https://draw.ai.1canc.com",
+	"https://canvas.ai.1canc.com",
+}
+
 func (s *SettingService) GetFrameSrcOrigins(ctx context.Context) ([]string, error) {
 	settings, err := s.GetPublicSettings(ctx)
 	if err != nil {
@@ -787,6 +798,11 @@ func (s *SettingService) GetFrameSrcOrigins(ctx context.Context) ([]string, erro
 				origins = append(origins, origin)
 			}
 		}
+	}
+
+	// fork(sub2api): 集成工作台内置壳页面的 iframe 来源
+	for _, origin := range playgroundFrameSrcOrigins {
+		addOrigin(origin)
 	}
 
 	// home content URL (when home_content is set to a URL for iframe embedding)
