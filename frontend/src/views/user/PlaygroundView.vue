@@ -56,10 +56,12 @@ function gatewayV1URL(): string {
 function buildInjectedConfig(): PlaygroundInjectedConfig | null {
   const group = selectedGroup.value
   if (!group) return null
+  // /pgw 代理模式：浏览器只持有 24h 短时令牌，真实 key 留在服务端
+  const usePgw = appMeta.value.usePgwProxy && !!config.value?.pgw_base_url && !!group.pgw_token
   return {
     app: appKey.value,
-    apiUrl: gatewayV1URL(),
-    apiKey: group.key,
+    apiUrl: usePgw ? config.value!.pgw_base_url : gatewayV1URL(),
+    apiKey: usePgw ? group.pgw_token : group.key,
     groupName: group.name,
     models: group.models ?? []
   }

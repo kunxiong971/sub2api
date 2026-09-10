@@ -12,11 +12,15 @@ export interface PlaygroundGroupConfig {
   key: string
   /** 分组模型白名单（未启用白名单时为空数组，表示使用平台默认模型列表） */
   models: string[]
+  /** /pgw 会话代理短时令牌（24h），配合 pgw_base_url 使用 */
+  pgw_token: string
 }
 
 export interface PlaygroundConfig {
   /** 站点网关根地址（不含路径），如 https://api.example.com */
   gateway_base_url: string
+  /** /pgw 会话代理根地址，如 https://api.example.com/pgw/v1 */
+  pgw_base_url: string
   groups: PlaygroundGroupConfig[]
 }
 

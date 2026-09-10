@@ -24,20 +24,29 @@ export interface PlaygroundAppMeta {
   title: string
   /** key 注入方式：url = 拼查询参数；postMessage = iframe 加载后循环发消息 */
   injectMode: 'url' | 'postMessage'
+  /**
+   * 是否走 /pgw 会话代理（服务端注入真实 key，浏览器只持有 24h 短时令牌）。
+   * image/canvas 的配置存浏览器本地，默认开启代理隐藏真实 key；
+   * lobe 的配置存其服务端数据库（加密），保持真实 key 以免令牌过期导致对话中断。
+   */
+  usePgwProxy: boolean
 }
 
 export const PLAYGROUND_APP_CONFIG: Record<PlaygroundAppKey, PlaygroundAppMeta> = {
   chat: {
     title: 'AI 对话',
-    injectMode: 'postMessage'
+    injectMode: 'postMessage',
+    usePgwProxy: false
   },
   image: {
     title: '生图工作台',
-    injectMode: 'url'
+    injectMode: 'url',
+    usePgwProxy: true
   },
   canvas: {
     title: '无限画布',
-    injectMode: 'postMessage'
+    injectMode: 'postMessage',
+    usePgwProxy: true
   }
 }
 
