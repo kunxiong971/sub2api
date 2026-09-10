@@ -1,12 +1,12 @@
 /**
  * Playground（集成工作台）应用配置
  *
- * 部署形态（子域名方案，由 Caddy 反代）：
- *   chat.<域名>   → lobehub/lobehub（fork，支持 postMessage 注入；v2 不支持子路径挂载）
- *   image.<域名>  → CookSleep/gpt_image_playground（原生 URL 参数注入，静态托管）
- *   canvas.<域名> → basketikun/infinite-canvas（构建时 VITE_BASE 支持子路径，也可子域名）
+ * 当前部署形态（ai.1canc.com 实例，子域名方案，宝塔 nginx 反代）：
+ *   chat.ai.1canc.com   → lobehub（fork，支持 postMessage 注入）   反代 127.0.0.1:3210
+ *   draw.ai.1canc.com   → gpt_image_playground（URL 参数注入）     反代 127.0.0.1:3002
+ *   canvas.ai.1canc.com → infinite-canvas（postMessage 注入）     静态托管 /www/wwwroot/canvas.ai.1canc.com
  *
- * 管理员二开时修改下方 DEPLOY_BASES 为自己的实际地址后重新构建前端；
+ * 修改下方 DEPLOY_BASES 后需重新构建前端（产物进 backend/internal/web/dist）并重新编译带 -tags embed 的后端；
  * 也可通过 localStorage（键: playground_base_<app>）或 URL ?appBase= 临时覆盖。
  */
 
@@ -14,9 +14,9 @@ export type PlaygroundAppKey = 'chat' | 'image' | 'canvas'
 
 /** 各工作台的部署地址（管理员二开时修改这里） */
 const DEPLOY_BASES: Record<PlaygroundAppKey, string> = {
-  chat: 'https://chat.example.com',
-  image: 'https://image.example.com',
-  canvas: 'https://canvas.example.com'
+  chat: 'https://chat.ai.1canc.com',
+  image: 'https://draw.ai.1canc.com',
+  canvas: 'https://canvas.ai.1canc.com'
 }
 
 export interface PlaygroundAppMeta {
