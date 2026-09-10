@@ -69,6 +69,7 @@ export default {
     title: 'API Keys',
     description: 'Manage your API keys and access tokens',
     searchPlaceholder: 'Search name or key...',
+    playgroundBadge: 'Workspace',
     endpoints: {
       title: 'API Endpoints',
       default: 'Default',

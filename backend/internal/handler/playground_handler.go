@@ -36,6 +36,9 @@ type PlaygroundConfigResponse struct {
 	// PGWBaseURL /pgw 会话代理根地址（如 https://api.example.com/pgw/v1）。
 	// 工作台把它当 OpenAI Base URL 使用，密钥由代理在服务端注入。
 	PGWBaseURL string `json:"pgw_base_url"`
+	// LobeTicket lobe 免登录桥票据（typ=lobe，5min 有效）。壳页面用它拼接
+	// {lobeBase}/api/sub2api/bridge-login?ticket=... 实现无感登录。
+	LobeTicket string `json:"lobe_ticket"`
 	// Groups 用户当前可用的分组及其 key。新增分组后此接口实时返回，无需任何配置。
 	Groups []PlaygroundGroupConfig `json:"groups"`
 }
@@ -120,9 +123,16 @@ func (h *APIKeyHandler) GetPlaygroundConfig(c *gin.Context) {
 		})
 	}
 
+	// lobe 免登录票据（签发失败不阻塞配置下发，仅置空）
+	lobeTicket, lobeTicketErr := h.authService.SignLobeTicket(subject.UserID)
+	if lobeTicketErr != nil {
+		lobeTicket = ""
+	}
+
 	response.Success(c, PlaygroundConfigResponse{
 		GatewayBaseURL: playgroundGatewayBaseURL(c),
 		PGWBaseURL:     playgroundGatewayBaseURL(c) + "/pgw/v1",
+		LobeTicket:     lobeTicket,
 		Groups:         out,
 	})
 }

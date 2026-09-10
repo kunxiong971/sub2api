@@ -69,6 +69,7 @@ export default {
     title: 'API 密钥',
     description: '管理您的 API 密钥和访问令牌',
     searchPlaceholder: '搜索名称或Key...',
+    playgroundBadge: '工作台',
     endpoints: {
       title: 'API 端点',
       default: '默认',

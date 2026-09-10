@@ -123,6 +123,14 @@
           <template #cell-name="{ value, row }">
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <!-- fork: 集成工作台自动创建的 key 徽章 -->
+              <span
+                v-if="value?.startsWith('Playground · ')"
+                class="shrink-0 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-violet-600 dark:bg-violet-500/10 dark:text-violet-400"
+                :title="t('keys.playgroundBadge')"
+              >
+                {{ t('keys.playgroundBadge') }}
+              </span>
               <Icon
                 v-if="row.ip_whitelist?.length > 0 || row.ip_blacklist?.length > 0"
                 name="shield"

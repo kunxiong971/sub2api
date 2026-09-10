@@ -21,6 +21,8 @@ export interface PlaygroundConfig {
   gateway_base_url: string
   /** /pgw 会话代理根地址，如 https://api.example.com/pgw/v1 */
   pgw_base_url: string
+  /** lobe 免登录桥票据（typ=lobe，5min 有效） */
+  lobe_ticket: string
   groups: PlaygroundGroupConfig[]
 }
 

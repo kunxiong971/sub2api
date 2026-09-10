@@ -64,6 +64,8 @@ services:
       - KEY_VAULTS_SECRET=${LOBEHUB_KEY_VAULTS_SECRET:?LOBEHUB_KEY_VAULTS_SECRET is required}
       - AUTH_SECRET=${LOBEHUB_AUTH_SECRET:?LOBEHUB_AUTH_SECRET is required}
       - JWKS_KEY=${LOBEHUB_JWKS_KEY:-}
+      # 免登录桥：必须与 sub2api 的 JWT_SECRET 保持一致，否则票据校验失败回落 /signin
+      - SUB2API_BRIDGE_SECRET=${SUB2API_BRIDGE_SECRET:-}
       - TZ=${TZ:-Asia/Shanghai}
       # ---- S3 对象存储（文件上传/知识库，选填）----
       - S3_ACCESS_KEY_ID=${LOBEHUB_S3_ACCESS_KEY_ID:-}

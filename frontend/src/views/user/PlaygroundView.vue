@@ -17,6 +17,7 @@ import {
   PLAYGROUND_APP_CONFIG,
   PLAYGROUND_CONFIG_MESSAGE_TYPE,
   PLAYGROUND_CONFIG_ACK_TYPE,
+  PLAYGROUND_THEME_MESSAGE_TYPE,
   normalizePlaygroundBase,
   resolvePlaygroundBase,
   type PlaygroundAppKey,
@@ -69,7 +70,17 @@ function buildInjectedConfig(): PlaygroundInjectedConfig | null {
 
 function buildIframeSrc(): string {
   const base = normalizePlaygroundBase(resolvePlaygroundBase(appKey.value))
-  if (appMeta.value.injectMode !== 'url') return base
+  // lobe 免登录：先经 bridge-login 以票据建立会话，再 302 回应用本体
+  if (appMeta.value.injectMode === 'postMessage') {
+    if (appMeta.value.autoLogin && config.value?.lobe_ticket) {
+      const params = new URLSearchParams({
+        ticket: config.value.lobe_ticket,
+        callbackUrl: '/'
+      })
+      return `${base}api/sub2api/bridge-login?${params.toString()}`
+    }
+    return base
+  }
   const cfg = buildInjectedConfig()
   if (!cfg) return base
   // gpt_image_playground 原生支持的快速配置参数
@@ -152,6 +163,30 @@ function render() {
     // iframe 加载需要时间，稍等后开始注入
     window.setTimeout(startPostMessage, 1200)
   }
+  broadcastTheme()
+}
+
+// ==================== 主题同步 ====================
+
+let themeObserver: MutationObserver | null = null
+
+function currentThemeMode(): 'dark' | 'light' {
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+}
+
+function broadcastTheme() {
+  const frame = frameRef.value
+  if (!frame?.contentWindow) return
+  frame.contentWindow.postMessage(
+    { type: PLAYGROUND_THEME_MESSAGE_TYPE, payload: { mode: currentThemeMode() } },
+    '*'
+  )
+}
+
+function watchPanelTheme() {
+  if (themeObserver) return
+  themeObserver = new MutationObserver(broadcastTheme)
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
 }
 
 function onGroupChange(event: Event) {
@@ -182,10 +217,13 @@ watch(appKey, () => {
 onMounted(() => {
   loadConfig()
   window.addEventListener('message', handleBridgeAck)
+  watchPanelTheme()
 })
 onBeforeUnmount(() => {
   stopPostMessage()
   window.removeEventListener('message', handleBridgeAck)
+  themeObserver?.disconnect()
+  themeObserver = null
 })
 </script>
 
@@ -208,6 +246,18 @@ onBeforeUnmount(() => {
       <div class="h-4 w-px bg-gray-200 dark:bg-dark-600" />
 
       <h1 class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ appMeta.title }}</h1>
+
+      <!-- fork: /pgw 代理模式徽标——真实 key 在服务端注入 -->
+      <span
+        v-if="appMeta.usePgwProxy && config?.pgw_base_url && selectedGroup?.pgw_token"
+        class="flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
+        title="密钥代理已启用：真实 API Key 由服务端注入，浏览器不保存"
+      >
+        <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+        </svg>
+        代理
+      </span>
 
       <div class="ml-auto flex items-center gap-2">
         <label v-if="groups.length > 1" class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">

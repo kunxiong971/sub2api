@@ -15,6 +15,27 @@ import (
 // 但 typ 隔离：面板 JWT 不能当 pgw 令牌用，反之亦然。
 const PlaygroundTokenTTL = 24 * time.Hour
 
+// LobeTicketTTL lobe 免登录票据有效期：仅用于发起登录的瞬时跳转，5 分钟足够。
+const LobeTicketTTL = 5 * time.Minute
+
+// SignLobeTicket 为 lobe 免登录桥签发一次性登录票据（typ=lobe）。
+// lobe 服务端用共享密钥校验后为其建立 Better Auth 会话。
+func (s *AuthService) SignLobeTicket(userID int64) (string, error) {
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"typ": "lobe",
+		"uid": userID,
+		"iat": now.Unix(),
+		"exp": now.Add(LobeTicketTTL).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(s.cfg.JWT.Secret))
+	if err != nil {
+		return "", fmt.Errorf("sign lobe ticket: %w", err)
+	}
+	return tokenString, nil
+}
+
 // SignPlaygroundToken 为「用户 + 分组」签发一把 /pgw 短时令牌。
 func (s *AuthService) SignPlaygroundToken(userID, groupID int64) (string, error) {
 	now := time.Now()

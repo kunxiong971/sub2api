@@ -30,13 +30,16 @@ export interface PlaygroundAppMeta {
    * lobe 的配置存其服务端数据库（加密），保持真实 key 以免令牌过期导致对话中断。
    */
   usePgwProxy: boolean
+  /** 是否通过免登录桥自动建立子应用会话（lobe 专用：bridge-login 票据跳转） */
+  autoLogin?: boolean
 }
 
 export const PLAYGROUND_APP_CONFIG: Record<PlaygroundAppKey, PlaygroundAppMeta> = {
   chat: {
     title: 'AI 对话',
     injectMode: 'postMessage',
-    usePgwProxy: false
+    usePgwProxy: false,
+    autoLogin: true
   },
   image: {
     title: '生图工作台',
@@ -76,6 +79,9 @@ export const PLAYGROUND_CONFIG_MESSAGE_TYPE = 'sub2api:playground-config'
 
 /** 子应用成功写入配置后回发的 ACK 消息类型 */
 export const PLAYGROUND_CONFIG_ACK_TYPE = 'sub2api:playground-config-ack'
+
+/** 宿主 → 子应用的主题同步消息 */
+export const PLAYGROUND_THEME_MESSAGE_TYPE = 'sub2api:theme'
 
 export interface PlaygroundInjectedConfig {
   app: PlaygroundAppKey

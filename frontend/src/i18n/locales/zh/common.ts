@@ -166,6 +166,7 @@ export default {
     dashboard: '仪表盘',
     announcements: '公告',
     apiKeys: 'API 密钥',
+    playgroundBadge: '工作台',
     playgroundChat: 'AI 对话',
     playgroundImage: '生图工作台',
     playgroundCanvas: '无限画布',
