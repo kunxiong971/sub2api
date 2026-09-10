@@ -116,6 +116,9 @@ func registerRoutes(
 	// 通用路由（健康检查、状态等）
 	routes.RegisterCommonRoutes(r)
 
+	// 集成工作台 /pgw 会话代理网关（fork 二开：服务端注入真实 key）
+	routes.RegisterPlaygroundProxyRoutes(r, h)
+
 	// API v1
 	v1 := r.Group("/api/v1")
 

@@ -65,6 +65,9 @@ export function normalizePlaygroundBase(base: string): string {
 /** postMessage 消息类型（lobe-chat / infinite-canvas fork 侧约定） */
 export const PLAYGROUND_CONFIG_MESSAGE_TYPE = 'sub2api:playground-config'
 
+/** 子应用成功写入配置后回发的 ACK 消息类型 */
+export const PLAYGROUND_CONFIG_ACK_TYPE = 'sub2api:playground-config-ack'
+
 export interface PlaygroundInjectedConfig {
   app: PlaygroundAppKey
   /** 网关 OpenAI 兼容端点，如 https://api.example.com/v1 */

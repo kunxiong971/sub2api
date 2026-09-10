@@ -24,12 +24,18 @@ type PlaygroundGroupConfig struct {
 	Platform string   `json:"platform"`
 	Key      string   `json:"key"`
 	Models   []string `json:"models"`
+	// PGWToken /pgw 会话代理短时令牌（24h）。使用代理模式时浏览器只持有
+	// 该令牌，真实 key 不出服务端；未使用代理模式时忽略此字段。
+	PGWToken string `json:"pgw_token"`
 }
 
 // PlaygroundConfigResponse 集成工作台（对话/生图/画布）注入配置。
 type PlaygroundConfigResponse struct {
 	// GatewayBaseURL 站点网关根地址（不含路径），如 https://api.example.com
 	GatewayBaseURL string `json:"gateway_base_url"`
+	// PGWBaseURL /pgw 会话代理根地址（如 https://api.example.com/pgw/v1）。
+	// 工作台把它当 OpenAI Base URL 使用，密钥由代理在服务端注入。
+	PGWBaseURL string `json:"pgw_base_url"`
 	// Groups 用户当前可用的分组及其 key。新增分组后此接口实时返回，无需任何配置。
 	Groups []PlaygroundGroupConfig `json:"groups"`
 }
@@ -93,6 +99,12 @@ func (h *APIKeyHandler) GetPlaygroundConfig(c *gin.Context) {
 			key = created
 		}
 
+		// /pgw 会话代理短时令牌（签发失败不阻塞配置下发，仅置空）
+		pgwToken, tokenErr := h.authService.SignPlaygroundToken(subject.UserID, g.ID)
+		if tokenErr != nil {
+			pgwToken = ""
+		}
+
 		models := make([]string, 0)
 		if g.ModelAllowlist.Enabled {
 			models = append(models, g.ModelAllowlist.Models...)
@@ -104,11 +116,13 @@ func (h *APIKeyHandler) GetPlaygroundConfig(c *gin.Context) {
 			Platform: g.Platform,
 			Key:      key.Key,
 			Models:   models,
+			PGWToken: pgwToken,
 		})
 	}
 
 	response.Success(c, PlaygroundConfigResponse{
 		GatewayBaseURL: playgroundGatewayBaseURL(c),
+		PGWBaseURL:     playgroundGatewayBaseURL(c) + "/pgw/v1",
 		Groups:         out,
 	})
 }

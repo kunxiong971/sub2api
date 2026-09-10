@@ -16,6 +16,7 @@ import { buildGatewayUrl } from '@/api/url'
 import {
   PLAYGROUND_APP_CONFIG,
   PLAYGROUND_CONFIG_MESSAGE_TYPE,
+  PLAYGROUND_CONFIG_ACK_TYPE,
   normalizePlaygroundBase,
   resolvePlaygroundBase,
   type PlaygroundAppKey,
@@ -112,6 +113,14 @@ function startPostMessage() {
   }, MESSAGE_INTERVAL_MS)
 }
 
+// 子应用收到配置后回发 ACK，宿主立即停止注入循环
+function handleBridgeAck(event: MessageEvent) {
+  const data = event.data as { type?: unknown } | null
+  if (!data || data.type !== PLAYGROUND_CONFIG_ACK_TYPE) return
+  if (event.source !== frameRef.value?.contentWindow) return
+  stopPostMessage()
+}
+
 // ==================== 数据加载 ====================
 
 async function loadConfig() {
@@ -168,8 +177,14 @@ watch(appKey, () => {
   render()
 })
 
-onMounted(loadConfig)
-onBeforeUnmount(stopPostMessage)
+onMounted(() => {
+  loadConfig()
+  window.addEventListener('message', handleBridgeAck)
+})
+onBeforeUnmount(() => {
+  stopPostMessage()
+  window.removeEventListener('message', handleBridgeAck)
+})
 </script>
 
 <template>
