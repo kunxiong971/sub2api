@@ -391,6 +391,22 @@ const FolderIcon = {
     )
 }
 
+// fork: 工作台注入配置入口（应用窗口 + 网格，示意多工作台）
+const AppWindowIcon = {
+  render: () =>
+    h(
+      'svg',
+      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
+      [
+        h('path', {
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+          d: 'M3 5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25v13.5A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 18.75V5.25zm0 3.75h18M9 21V9m12 5.25h-6'
+        })
+      ]
+    )
+}
+
 const ChannelIcon = {
   render: () =>
     h(
@@ -814,6 +830,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon },
+    { path: '/admin/playground', label: t('nav.playground'), icon: AppWindowIcon },
     {
       path: '/admin/channels',
       label: t('nav.channelManagement'),

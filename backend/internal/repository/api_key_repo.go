@@ -451,6 +451,10 @@ func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service
 			q = q.Where(apikey.GroupIDEQ(*filters.GroupID))
 		}
 	}
+	if filters.ExcludeNamePrefix != "" {
+		// fork: 用户端隐藏工作台托管密钥（Playground · 前缀）
+		q = q.Where(apikey.Not(apikey.NameHasPrefix(filters.ExcludeNamePrefix)))
+	}
 
 	return q
 }

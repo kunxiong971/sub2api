@@ -23,13 +23,20 @@ type APIKeyHandler struct {
 	apiKeyService *service.APIKeyService
 	// authService 用于签发/校验 /pgw 会话代理的短时令牌（fork 二开）
 	authService *service.AuthService
+	// playgroundConfigService 工作台注入配置（管理员按应用配置的分组与模型展示清单）
+	playgroundConfigService *service.PlaygroundConfigService
 }
 
 // NewAPIKeyHandler creates a new APIKeyHandler
-func NewAPIKeyHandler(apiKeyService *service.APIKeyService, authService *service.AuthService) *APIKeyHandler {
+func NewAPIKeyHandler(
+	apiKeyService *service.APIKeyService,
+	authService *service.AuthService,
+	playgroundConfigService *service.PlaygroundConfigService,
+) *APIKeyHandler {
 	return &APIKeyHandler{
-		apiKeyService: apiKeyService,
-		authService:   authService,
+		apiKeyService:           apiKeyService,
+		authService:             authService,
+		playgroundConfigService: playgroundConfigService,
 	}
 }
 
@@ -136,6 +143,8 @@ func (h *APIKeyHandler) List(c *gin.Context) {
 			filters.GroupID = &gid
 		}
 	}
+	// fork: 用户密钥列表隐藏工作台托管密钥（Playground 前缀），管理端列表不受影响。
+	filters.ExcludeNamePrefix = service.PlaygroundKeyNamePrefix
 
 	keys, result, err := h.apiKeyService.List(c.Request.Context(), subject.UserID, params, filters)
 	if err != nil {
@@ -244,6 +253,12 @@ func (h *APIKeyHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// fork: 工作台托管密钥不允许编辑/禁用（删除同理，见 Delete）。
+	if err := h.rejectManagedPlaygroundKey(c.Request.Context(), keyID, subject.UserID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	var req UpdateAPIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -311,6 +326,13 @@ func (h *APIKeyHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	// fork: 工作台托管密钥不允许删除（客户删掉后下次进工作台会自动重新签发，
+	// 锁死只是为了减少误删与被盗刷面）。
+	if err := h.rejectManagedPlaygroundKey(c.Request.Context(), keyID, subject.UserID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	err = h.apiKeyService.Delete(c.Request.Context(), keyID, subject.UserID)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -318,6 +340,19 @@ func (h *APIKeyHandler) Delete(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "API key deleted successfully"})
+}
+
+// rejectManagedPlaygroundKey 工作台托管密钥（Playground 前缀）不允许用户删除/编辑。
+// key 不存在或不属于本人时放行，交由后续所有权校验返回标准错误。
+func (h *APIKeyHandler) rejectManagedPlaygroundKey(ctx context.Context, keyID, userID int64) error {
+	key, err := h.apiKeyService.GetByID(ctx, keyID)
+	if err != nil || key == nil || key.UserID != userID {
+		return nil
+	}
+	if service.IsManagedPlaygroundKeyName(key.Name) {
+		return service.ErrPlaygroundKeyManaged
+	}
+	return nil
 }
 
 // GetAvailableGroups 获取用户可以绑定的分组列表

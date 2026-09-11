@@ -496,6 +496,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/playground',
+    name: 'AdminPlayground',
+    component: () => import('@/views/admin/PlaygroundAdminView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Playground Config',
+      titleKey: 'admin.playground.title',
+      descriptionKey: 'admin.playground.description'
+    }
+  },
+  {
     path: '/admin/channels',
     redirect: '/admin/channels/pricing'
   },

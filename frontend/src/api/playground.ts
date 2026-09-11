@@ -16,6 +16,29 @@ export interface PlaygroundGroupConfig {
   pgw_token: string
 }
 
+/** 管理员配置的模型展示信息（display_name / price_label 纯展示，不参与计费） */
+export interface PlaygroundAppModelInfo {
+  model_id: string
+  display_name: string
+  price_label: string
+  unit_hint: string
+  description: string
+  sort_order: number
+}
+
+/** 单个应用下某个绑定分组的注入配置 */
+export interface PlaygroundAppGroupConfig {
+  group: PlaygroundGroupConfig
+  models: PlaygroundAppModelInfo[]
+}
+
+/** 管理员为单个应用配置的注入规则（只含已启用且已绑定分组的应用，可绑定多个分组） */
+export interface PlaygroundAppConfig {
+  app: 'chat' | 'image' | 'canvas'
+  inject_mode: string
+  groups: PlaygroundAppGroupConfig[]
+}
+
 export interface PlaygroundConfig {
   /** 站点网关根地址（不含路径），如 https://api.example.com */
   gateway_base_url: string
@@ -24,6 +47,11 @@ export interface PlaygroundConfig {
   /** lobe 免登录桥票据（typ=lobe，5min 有效） */
   lobe_ticket: string
   groups: PlaygroundGroupConfig[]
+  /**
+   * 管理员在「工作台配置」中下发的注入规则。
+   * 为空数组表示管理员尚未配置，此时壳页面回退到 groups 行为。
+   */
+  apps: PlaygroundAppConfig[]
 }
 
 /**

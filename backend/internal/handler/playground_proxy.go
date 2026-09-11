@@ -90,7 +90,7 @@ func (h *APIKeyHandler) resolvePlaygroundKey(ctx context.Context, userID, groupI
 		name = fmt.Sprintf("Group #%d", groupID)
 	}
 	return h.apiKeyService.Create(ctx, userID, service.CreateAPIKeyRequest{
-		Name:    playgroundKeyNamePrefix + name,
+		Name:    service.PlaygroundKeyNamePrefix + name,
 		GroupID: &groupID,
 	})
 }

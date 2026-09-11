@@ -83,11 +83,31 @@ export const PLAYGROUND_CONFIG_ACK_TYPE = 'sub2api:playground-config-ack'
 /** 宿主 → 子应用的主题同步消息 */
 export const PLAYGROUND_THEME_MESSAGE_TYPE = 'sub2api:theme'
 
+/** 注入给工作台的单个模型（含展示元数据） */
+export interface PlaygroundInjectedModel {
+  model_id: string
+  display_name?: string
+  price_label?: string
+  unit_hint?: string
+  description?: string
+}
+
+/** 注入给工作台的单个分组/渠道 */
+export interface PlaygroundInjectedGroup {
+  groupName: string
+  /** 网关 OpenAI 兼容端点，如 https://api.example.com/v1 */
+  apiUrl: string
+  apiKey: string
+  models: PlaygroundInjectedModel[]
+}
+
 export interface PlaygroundInjectedConfig {
   app: PlaygroundAppKey
-  /** 网关 OpenAI 兼容端点，如 https://api.example.com/v1 */
+  /** 兼容旧单分组字段（取第一个分组） */
   apiUrl: string
   apiKey: string
   groupName: string
   models: string[]
+  /** 多分组注入（多渠道），工作台据此添加多个渠道 */
+  groups?: PlaygroundInjectedGroup[]
 }

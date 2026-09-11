@@ -130,6 +130,20 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+
+		// 工作台注入配置（对话/生图/画布）
+		registerPlaygroundRoutes(admin, h)
+	}
+}
+
+// registerPlaygroundRoutes 工作台「注入配置」管理接口。
+// 这里只配置策略（应用 → 分组 → 模型展示清单），不含任何真实密钥。
+func registerPlaygroundRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	playground := admin.Group("/playground")
+	{
+		playground.GET("/configs", h.Admin.Playground.ListPlaygroundConfigs)
+		playground.PUT("/configs/:app", h.Admin.Playground.UpdatePlaygroundConfig)
+		playground.GET("/configs/:app/models/candidates", h.Admin.Playground.GetPlaygroundModelCandidates)
 	}
 }
 

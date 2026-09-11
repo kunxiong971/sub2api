@@ -1,0 +1,52 @@
+export default {
+  playground: {
+    title: '工作台配置',
+    description: '为「对话 / 生图 / 画布」配置注入规则：绑定分组与模型展示清单（配置里不含任何密钥）',
+    tabs: {
+      chat: '对话',
+      image: '生图',
+      canvas: '画布'
+    },
+    basic: '基本配置',
+    addGroup: '添加分组',
+    removeGroup: '移除',
+    bindingCount: '已绑定 {count} 个分组',
+    noBindings: '尚未绑定任何分组',
+    noBindingsHint: '从上方下拉框选择分组并点击「添加分组」，即可为这个工作台添加一个渠道',
+    models: '模型清单',
+    enabled: '启用该分组',
+    enabledHint: '关闭后客户侧不会再收到这个工作台的注入配置',
+    group: '绑定分组',
+    groupPlaceholder: '请选择分组',
+    groupHint: '运行时使用「客户自己在该分组下的密钥」注入，此处不保存任何密钥',
+    save: '保存配置',
+    saving: '保存中…',
+    saved: '已保存',
+    fetchModels: '拉取模型',
+    fetching: '拉取中…',
+    fetchHint: '从所选分组的可选模型中拉取，避免手填出错',
+    searchModel: '搜索模型…',
+    col: {
+      model: '模型',
+      displayName: '展示名',
+      priceLabel: '价格标签',
+      unitHint: '计价单位',
+      description: '说明',
+      sortOrder: '排序',
+      enabled: '启用',
+      actions: '操作'
+    },
+    priceHint: '展示名与价格标签只用于客户界面展示，不参与实际计费；计费仍按分组倍率与计价体系',
+    selectAll: '全选',
+    selectedCount: '已选 {count} 个模型',
+    emptyModels: '还没有配置模型',
+    emptyHint: '点击「拉取模型」获取该分组可选的模型，然后勾选要开放给客户的',
+    errors: {
+      loadFailed: '加载配置失败',
+      saveFailed: '保存配置失败',
+      fetchFailed: '拉取模型失败',
+      modelsSaveFailed: '保存模型清单失败',
+      groupRequired: '请先选择分组'
+    }
+  }
+}

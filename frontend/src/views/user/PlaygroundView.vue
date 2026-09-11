@@ -11,7 +11,13 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getPlaygroundConfig, type PlaygroundConfig, type PlaygroundGroupConfig } from '@/api/playground'
+import {
+  getPlaygroundConfig,
+  type PlaygroundAppConfig,
+  type PlaygroundAppModelInfo,
+  type PlaygroundConfig,
+  type PlaygroundGroupConfig
+} from '@/api/playground'
 import { buildGatewayUrl } from '@/api/url'
 import {
   PLAYGROUND_APP_CONFIG,
@@ -21,7 +27,9 @@ import {
   normalizePlaygroundBase,
   resolvePlaygroundBase,
   type PlaygroundAppKey,
-  type PlaygroundInjectedConfig
+  type PlaygroundInjectedConfig,
+  type PlaygroundInjectedGroup,
+  type PlaygroundInjectedModel
 } from '@/config/playground'
 
 const route = useRoute()
@@ -42,8 +50,29 @@ const frameRef = ref<HTMLIFrameElement | null>(null)
 const iframeKey = ref(0)
 
 const groups = computed<PlaygroundGroupConfig[]>(() => config.value?.groups ?? [])
+
+// 管理员在「工作台配置」中下发的当前应用注入规则；apps 为空表示后台尚未配置（回退旧行为）
+const appConfig = computed<PlaygroundAppConfig | null>(() => {
+  const apps = config.value?.apps ?? []
+  if (apps.length === 0) return null
+  return apps.find((a) => a.app === appKey.value) ?? null
+})
+// 管理配置模式下当前应用绑定的所有分组（多个，客户无需自选）
+const managedGroups = computed<PlaygroundGroupConfig[]>(() =>
+  (appConfig.value?.groups ?? []).map((g) => g.group)
+)
+// 后台已配置工作台，但当前应用未开放（未启用/未绑定分组/客户无该分组权限）
+const appDisabled = computed<boolean>(() => {
+  const apps = config.value?.apps ?? []
+  return apps.length > 0 && appConfig.value === null
+})
+
 const selectedGroup = computed<PlaygroundGroupConfig | null>(
-  () => groups.value.find((g) => g.id === selectedGroupId.value) ?? groups.value[0] ?? null
+  () =>
+    managedGroups.value[0] ??
+    groups.value.find((g) => g.id === selectedGroupId.value) ??
+    groups.value[0] ??
+    null
 )
 
 const STORAGE_GROUP_KEY = (app: PlaygroundAppKey) => `playground_group_${app}`
@@ -54,17 +83,53 @@ function gatewayV1URL(): string {
   return base ? `${base}/v1` : buildGatewayUrl('/v1')
 }
 
-function buildInjectedConfig(): PlaygroundInjectedConfig | null {
-  const group = selectedGroup.value
-  if (!group) return null
+// 把一个分组构建为注入配置（含该分组下管理员标注的模型展示信息）
+function buildInjectedGroup(
+  group: PlaygroundGroupConfig,
+  modelInfos?: PlaygroundAppModelInfo[]
+): PlaygroundInjectedGroup {
   // /pgw 代理模式：浏览器只持有 24h 短时令牌，真实 key 留在服务端
   const usePgw = appMeta.value.usePgwProxy && !!config.value?.pgw_base_url && !!group.pgw_token
+  const models: PlaygroundInjectedModel[] = (modelInfos ?? []).map((m) => ({
+    model_id: m.model_id,
+    display_name: m.display_name,
+    price_label: m.price_label,
+    unit_hint: m.unit_hint,
+    description: m.description
+  }))
   return {
-    app: appKey.value,
+    groupName: group.name,
     apiUrl: usePgw ? config.value!.pgw_base_url : gatewayV1URL(),
     apiKey: usePgw ? group.pgw_token : group.key,
-    groupName: group.name,
-    models: group.models ?? []
+    models
+  }
+}
+
+function buildInjectedConfig(): PlaygroundInjectedConfig | null {
+  // 管理模式：多分组（多渠道）
+  if (managedGroups.value.length > 0 && appConfig.value) {
+    const groups = appConfig.value.groups.map((ag) => buildInjectedGroup(ag.group, ag.models))
+    const first = groups[0]
+    return {
+      app: appKey.value,
+      apiUrl: first.apiUrl,
+      apiKey: first.apiKey,
+      groupName: first.groupName,
+      models: first.models.map((m) => m.model_id),
+      groups
+    }
+  }
+  // 回退模式：单分组
+  const group = selectedGroup.value
+  if (!group) return null
+  const g = buildInjectedGroup(group)
+  return {
+    app: appKey.value,
+    apiUrl: g.apiUrl,
+    apiKey: g.apiKey,
+    groupName: g.groupName,
+    models: group.models ?? [],
+    groups: [g]
   }
 }
 
@@ -83,7 +148,7 @@ function buildIframeSrc(): string {
   }
   const cfg = buildInjectedConfig()
   if (!cfg) return base
-  // gpt_image_playground 原生支持的快速配置参数
+  // gpt_image_playground 原生支持的快速配置参数（第一分组）
   const params = new URLSearchParams({
     apiUrl: cfg.apiUrl,
     apiKey: cfg.apiKey,
@@ -91,6 +156,20 @@ function buildIframeSrc(): string {
   })
   if (cfg.models.length > 0) {
     params.set('model', cfg.models[0])
+  }
+  // 多分组：附带 profiles（每个分组一个 profile，含模型展示元数据）
+  if (cfg.groups && cfg.groups.length > 1) {
+    params.set(
+      'profiles',
+      JSON.stringify(
+        cfg.groups.map((g) => ({
+          name: `sub2api · ${g.groupName}`,
+          baseUrl: g.apiUrl,
+          apiKey: g.apiKey,
+          models: g.models
+        }))
+      )
+    )
   }
   return `${base}?${params.toString()}`
 }
@@ -260,7 +339,10 @@ onBeforeUnmount(() => {
       </span>
 
       <div class="ml-auto flex items-center gap-2">
-        <label v-if="groups.length > 1" class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+        <label
+          v-if="managedGroups.length === 0 && groups.length > 1"
+          class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
+        >
           分组
           <select
             class="h-8 rounded-lg border border-gray-300 bg-white px-2 text-xs text-gray-800 outline-none transition focus:border-primary-500 dark:border-dark-500 dark:bg-dark-800 dark:text-gray-200"
@@ -270,6 +352,12 @@ onBeforeUnmount(() => {
             <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
           </select>
         </label>
+        <span
+          v-else-if="managedGroups.length > 1"
+          class="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+        >
+          {{ managedGroups.map((g) => g.name).join(' · ') }}
+        </span>
         <span
           v-else-if="selectedGroup"
           class="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
@@ -315,6 +403,15 @@ onBeforeUnmount(() => {
         <div class="max-w-sm text-center">
           <p class="text-sm text-red-500">{{ loadError }}</p>
           <button class="btn btn-secondary mt-4" @click="loadConfig">重试</button>
+        </div>
+      </div>
+
+      <!-- 应用未开放（管理员未启用该工作台或客户无对应分组权限） -->
+      <div v-else-if="appDisabled || !selectedGroup" class="flex h-full items-center justify-center">
+        <div class="max-w-sm text-center">
+          <p class="text-sm text-gray-600 dark:text-gray-300">该工作台暂未开放</p>
+          <p class="mt-2 text-xs text-gray-400">管理员尚未开启此工作台，请稍后再试</p>
+          <button class="btn btn-primary mt-4" @click="goDashboard">返回控制台</button>
         </div>
       </div>
 
