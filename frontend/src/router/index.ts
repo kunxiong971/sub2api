@@ -875,6 +875,11 @@ router.beforeEach(async (to, _from, next) => {
       next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
       return
     }
+    // fork: 未登录访问首页落地页 → 直接到登录/注册页
+    if (!authStore.isAuthenticated && to.path === '/home') {
+      next('/login')
+      return
+    }
     // Model Plaza:公开路由但受「启用开关 + 可选强制登录」双重控制(后端同口径 fail-closed)
     if (to.path === '/model-plaza') {
       if (!appStore.publicSettingsLoaded) {
@@ -892,7 +897,7 @@ router.beforeEach(async (to, _from, next) => {
             ? authStore.isAdmin
               ? '/admin/dashboard'
               : '/dashboard'
-            : '/home'
+            : '/login'
         )
         return
       }
