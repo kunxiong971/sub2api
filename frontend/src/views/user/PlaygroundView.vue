@@ -67,6 +67,14 @@ const appDisabled = computed<boolean>(() => {
   return apps.length > 0 && appConfig.value === null
 })
 
+// 顶栏分组标签：分组较多时压缩为「首个 +N」，避免一长串撑爆顶栏（完整列表见悬停提示）
+const groupSummaryLabel = computed(() => {
+  const names = managedGroups.value.map((g) => g.name)
+  if (names.length <= 2) return names.join(' · ')
+  return `${names[0]} +${names.length - 1}`
+})
+const groupSummaryTooltip = computed(() => managedGroups.value.map((g) => g.name).join('\n'))
+
 const selectedGroup = computed<PlaygroundGroupConfig | null>(
   () =>
     managedGroups.value[0] ??
@@ -157,8 +165,10 @@ function buildIframeSrc(): string {
   if (cfg.models.length > 0) {
     params.set('model', cfg.models[0])
   }
-  // 多分组：附带 profiles（每个分组一个 profile，含模型展示元数据）
-  if (cfg.groups && cfg.groups.length > 1) {
+  // 始终附带 profiles（每个分组一个 profile，含模型展示元数据）。
+  // 注意：即使只有一个分组也要下发——否则子应用的模型选择器会退回 /v1/models
+  // 全量列表，而不是工作台配置的模型清单（含展示名/价格标签）。
+  if (cfg.groups && cfg.groups.length > 0) {
     params.set(
       'profiles',
       JSON.stringify(
@@ -355,8 +365,9 @@ onBeforeUnmount(() => {
         <span
           v-else-if="managedGroups.length > 1"
           class="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+          :title="groupSummaryTooltip"
         >
-          {{ managedGroups.map((g) => g.name).join(' · ') }}
+          {{ groupSummaryLabel }}
         </span>
         <span
           v-else-if="selectedGroup"
