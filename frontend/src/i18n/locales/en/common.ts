@@ -166,6 +166,7 @@ export default {
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',
+    playgroundBadge: 'Workspace',
     playgroundChat: 'AI Chat',
     playgroundImage: 'Image Studio',
     playgroundCanvas: 'Infinite Canvas',
