@@ -138,7 +138,13 @@ onMounted(async () => {
 
 <template>
   <NavigationProgress />
-  <RouterView />
+  <!-- fork: 工作台壳页面（PlaygroundView）用 keep-alive 保活，
+       避免在路由间切换时销毁 iframe 导致第三方应用（lobe 等）整页重载 -->
+  <RouterView v-slot="{ Component, route }">
+    <KeepAlive :include="['PlaygroundView']">
+      <component :is="Component" v-if="Component" :key="route.fullPath" />
+    </KeepAlive>
+  </RouterView>
   <Toast />
   <AnnouncementPopup />
   <AdminComplianceDialog />

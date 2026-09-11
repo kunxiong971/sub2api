@@ -9,7 +9,7 @@
  *
  * 新增分组无需改任何代码：配置接口实时返回最新分组列表。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   getPlaygroundConfig,
@@ -31,6 +31,10 @@ import {
   type PlaygroundInjectedGroup,
   type PlaygroundInjectedModel
 } from '@/config/playground'
+
+// fork: keep-alive 按组件名缓存（与 App.vue 的 include 列表匹配），
+// 保证 /chat /image /canvas 三个路由各自保活一个实例
+defineOptions({ name: 'PlaygroundView' })
 
 const route = useRoute()
 const router = useRouter()
@@ -307,6 +311,14 @@ onMounted(() => {
   loadConfig()
   window.addEventListener('message', handleBridgeAck)
   watchPanelTheme()
+})
+// fork: keep-alive 恢复（从其他页面切回）：iframe 仍在后台运行，无需重建。
+// 幂等重发配置注入与主题，确保管理后台的配置变更切回后即时生效。
+onActivated(() => {
+  if (config.value) {
+    startPostMessage()
+    broadcastTheme()
+  }
 })
 onBeforeUnmount(() => {
   stopPostMessage()
