@@ -90,6 +90,8 @@ export interface PlaygroundInjectedModel {
   price_label?: string
   unit_hint?: string
   description?: string
+  /** 模型类型标记：chat/image/video/audio；空串 = 按模型名自动推断 */
+  model_kind?: string
   /**
    * 渠道监控最近检测状态（operational/degraded/failed/error）。
    * 空串/缺省 = 未关联监控或无检测数据，工作台不展示状态标签。

@@ -65,6 +65,15 @@ func IsManagedPlaygroundKeyName(name string) bool {
 // PlaygroundAppModel 应用下单个模型的展示配置。
 //
 // DisplayName / PriceLabel / UnitHint 纯展示，不参与计费；
+// 模型类型标记：管理端可为每个注入模型显式指定类型，工作台按类型分流注入
+// （对话进 Chat、生图进 Images、视频/语音同理）；空串 = 未标记，按模型名关键词自动推断。
+const (
+	ModelKindChat  = "chat"
+	ModelKindImage = "image"
+	ModelKindVideo = "video"
+	ModelKindAudio = "audio"
+)
+
 // 计费一律按 sub2api 既有的分组倍率与计价体系。
 type PlaygroundAppModel struct {
 	ID          int64     `json:"id"`
@@ -76,6 +85,8 @@ type PlaygroundAppModel struct {
 	Description string    `json:"description"`
 	Enabled     bool      `json:"enabled"`
 	SortOrder   int       `json:"sort_order"`
+	// ModelKind 模型类型标记：chat/image/video/audio；空串 = 按模型名自动推断。
+	ModelKind string `json:"model_kind,omitempty"`
 	// MonitorID 可选关联的渠道监控（展示层软引用，仅用于下发状态标签）。
 	MonitorID *int64 `json:"monitor_id,omitempty"`
 	// MonitorStatus 关联监控的最近检测状态（下发时快照）：
@@ -325,9 +336,20 @@ func (s *PlaygroundConfigService) normalizeModels(models []PlaygroundAppModel) [
 		if m.MonitorID != nil && *m.MonitorID <= 0 {
 			m.MonitorID = nil
 		}
+		m.ModelKind = normalizeModelKind(m.ModelKind)
 		normalized = append(normalized, m)
 	}
 	return normalized
+}
+
+// normalizeModelKind 归一模型类型标记：仅接受 chat/image/video/audio，其余归空（自动推断）。
+func normalizeModelKind(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case ModelKindChat, ModelKindImage, ModelKindVideo, ModelKindAudio:
+		return strings.TrimSpace(kind)
+	default:
+		return ""
+	}
 }
 
 // enrichMonitorStatuses 为关联了渠道监控的模型填充最近检测状态（monitor_status）。

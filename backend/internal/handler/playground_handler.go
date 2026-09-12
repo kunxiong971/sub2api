@@ -38,6 +38,7 @@ type PlaygroundAppModelView struct {
 	UnitHint      string `json:"unit_hint"`
 	Description   string `json:"description"`
 	SortOrder     int    `json:"sort_order"`
+	ModelKind     string `json:"model_kind,omitempty"`
 	MonitorStatus string `json:"monitor_status,omitempty"`
 }
 
@@ -164,6 +165,7 @@ func (h *APIKeyHandler) GetPlaygroundConfig(c *gin.Context) {
 					UnitHint:      m.UnitHint,
 					Description:   m.Description,
 					SortOrder:     m.SortOrder,
+					ModelKind:     m.ModelKind,
 					MonitorStatus: m.MonitorStatus,
 				})
 			}

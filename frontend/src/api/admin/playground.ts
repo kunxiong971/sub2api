@@ -18,6 +18,8 @@ export interface PlaygroundAppModelConfig {
   description: string
   enabled: boolean
   sort_order: number
+  /** 模型类型标记：chat/image/video/audio；空=按模型名自动推断 */
+  model_kind: string
   /** 可选关联的渠道监控（用于下发模型状态标签） */
   monitor_id: number | null
   created_at: string
@@ -46,6 +48,8 @@ export interface PlaygroundAppModelInput {
   description?: string
   enabled?: boolean
   sort_order?: number
+  /** 模型类型标记：chat/image/video/audio；空=自动推断 */
+  model_kind?: string
   /** 可选关联的渠道监控 ID */
   monitor_id?: number | null
 }

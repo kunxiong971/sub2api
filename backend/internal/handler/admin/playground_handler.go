@@ -23,6 +23,7 @@ func NewPlaygroundHandler(playgroundConfigService *service.PlaygroundConfigServi
 }
 
 // playgroundAppModelInput 单条模型展示配置。
+// ModelKind 可选模型类型标记（chat/image/video/audio，空=按模型名自动推断）。
 // MonitorID 可选关联的渠道监控（用于下发模型状态标签）。
 type playgroundAppModelInput struct {
 	ModelID     string `json:"model_id"`
@@ -32,6 +33,7 @@ type playgroundAppModelInput struct {
 	Description string `json:"description"`
 	Enabled     *bool  `json:"enabled"`
 	SortOrder   int    `json:"sort_order"`
+	ModelKind   string `json:"model_kind"`
 	MonitorID   *int64 `json:"monitor_id"`
 }
 
@@ -94,6 +96,7 @@ func (h *PlaygroundHandler) UpdatePlaygroundConfig(c *gin.Context) {
 				Description: m.Description,
 				Enabled:     enabled,
 				SortOrder:   m.SortOrder,
+				ModelKind:   m.ModelKind,
 				MonitorID:   m.MonitorID,
 			})
 		}

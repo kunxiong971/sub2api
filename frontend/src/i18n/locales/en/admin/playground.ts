@@ -34,12 +34,20 @@ export default {
       priceLabel: 'Price label',
       unitHint: 'Unit hint',
       description: 'Description',
+      kind: 'Kind',
       monitor: 'Channel monitor',
       sortOrder: 'Order',
       enabled: 'Enabled',
       actions: 'Actions'
     },
     monitorNone: 'None',
+    kindAuto: 'Auto',
+    kindChat: 'Chat (LLM)',
+    kindImage: 'Image',
+    kindVideo: 'Video',
+    kindAudio: 'Audio',
+    kindHint:
+      'When set, workbenches inject the model by its marked kind (chat / image / video / audio) instead of guessing from the model name',
     monitorHint:
       'When linked, the model shows a channel status tag (available / down) in Chat / Image / Canvas',
     priceHint:

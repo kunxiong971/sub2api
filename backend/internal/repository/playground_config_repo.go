@@ -67,7 +67,7 @@ func (r *playgroundConfigRepository) ListAppConfigs(ctx context.Context) ([]serv
 }
 
 const playgroundAppModelSelectColumns = `id, app_config_id, model_id, display_name, price_label,
-unit_hint, description, enabled, sort_order, monitor_id, created_at, updated_at`
+unit_hint, description, enabled, sort_order, model_kind, monitor_id, created_at, updated_at`
 
 func scanPlaygroundAppModel(scan func(dest ...any) error) (*service.PlaygroundAppModel, error) {
 	m := &service.PlaygroundAppModel{}
@@ -81,6 +81,7 @@ func scanPlaygroundAppModel(scan func(dest ...any) error) (*service.PlaygroundAp
 		&m.Description,
 		&m.Enabled,
 		&m.SortOrder,
+		&m.ModelKind,
 		&m.MonitorID,
 		&m.CreatedAt,
 		&m.UpdatedAt,
@@ -159,8 +160,8 @@ RETURNING id`,
 			}
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO playground_app_models
-  (app_config_id, model_id, display_name, price_label, unit_hint, description, enabled, sort_order, monitor_id, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())`,
+  (app_config_id, model_id, display_name, price_label, unit_hint, description, enabled, sort_order, model_kind, monitor_id, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())`,
 				cfgID,
 				truncateString(m.ModelID, 160),
 				truncateString(m.DisplayName, 160),
@@ -169,6 +170,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())`,
 				strings.TrimSpace(m.Description),
 				m.Enabled,
 				m.SortOrder,
+				m.ModelKind,
 				m.MonitorID,
 			); err != nil {
 				return err

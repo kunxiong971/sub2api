@@ -39,6 +39,7 @@ interface ModelRow {
   description: string
   enabled: boolean
   sort_order: number
+  model_kind: string
   monitor_id: number | null
 }
 
@@ -117,6 +118,7 @@ function applyBundle(bundle: PlaygroundAppBundle) {
       description: m.description,
       enabled: m.enabled,
       sort_order: m.sort_order,
+      model_kind: m.model_kind ?? '',
       monitor_id: m.monitor_id ?? null
     }))
   }))
@@ -174,6 +176,7 @@ async function fetchModels(groupId: number) {
         description: '',
         enabled: true,
         sort_order: base + added,
+        model_kind: '',
         monitor_id: null
       })
     })
@@ -205,6 +208,7 @@ async function saveAll() {
           description: m.description,
           enabled: m.enabled,
           sort_order: m.sort_order || idx + 1,
+          model_kind: m.model_kind || '',
           monitor_id: m.monitor_id
         }))
     }))
@@ -360,6 +364,7 @@ onMounted(loadData)
                   <th class="px-3 py-2 font-medium">{{ t('admin.playground.col.priceLabel') }}</th>
                   <th class="px-3 py-2 font-medium">{{ t('admin.playground.col.unitHint') }}</th>
                   <th class="px-3 py-2 font-medium">{{ t('admin.playground.col.description') }}</th>
+                  <th class="px-3 py-2 font-medium">{{ t('admin.playground.col.kind') }}</th>
                   <th class="px-3 py-2 font-medium">{{ t('admin.playground.col.monitor') }}</th>
                   <th class="w-16 px-3 py-2 font-medium">{{ t('admin.playground.col.sortOrder') }}</th>
                   <th class="w-14 px-3 py-2 font-medium">{{ t('admin.playground.col.enabled') }}</th>
@@ -405,6 +410,19 @@ onMounted(loadData)
                       type="text"
                       class="input h-7 w-40 px-2 py-0.5 text-xs"
                     />
+                  </td>
+                  <td class="px-3 py-2">
+                    <select
+                      v-model="row.model_kind"
+                      class="input h-7 w-24 px-1.5 py-0.5 text-xs"
+                      :title="t('admin.playground.kindHint')"
+                    >
+                      <option value="">{{ t('admin.playground.kindAuto') }}</option>
+                      <option value="chat">{{ t('admin.playground.kindChat') }}</option>
+                      <option value="image">{{ t('admin.playground.kindImage') }}</option>
+                      <option value="video">{{ t('admin.playground.kindVideo') }}</option>
+                      <option value="audio">{{ t('admin.playground.kindAudio') }}</option>
+                    </select>
                   </td>
                   <td class="px-3 py-2">
                     <select

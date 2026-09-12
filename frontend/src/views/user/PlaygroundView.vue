@@ -111,6 +111,7 @@ function buildInjectedGroup(
     price_label: m.price_label,
     unit_hint: m.unit_hint,
     description: m.description,
+    model_kind: m.model_kind ?? '',
     monitor_status: m.monitor_status ?? ''
   }))
   return {

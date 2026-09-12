@@ -24,6 +24,8 @@ export interface PlaygroundAppModelInfo {
   unit_hint: string
   description: string
   sort_order: number
+  /** 模型类型标记：chat/image/video/audio；空串/缺省 = 按模型名自动推断 */
+  model_kind?: string
   /**
    * 关联渠道监控的最近检测状态（下发时快照）：
    * operational / degraded / failed / error；空串/缺省 = 未关联或无检测数据
