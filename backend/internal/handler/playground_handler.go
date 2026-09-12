@@ -29,13 +29,16 @@ type PlaygroundGroupConfig struct {
 }
 
 // PlaygroundAppModelView 用户端下发的模型展示信息（纯展示，不参与计费）。
+// MonitorStatus 关联渠道监控的最近检测状态（operational/degraded/failed/error），
+// 空串表示未关联监控或监控无检测数据，前端不展示状态标签。
 type PlaygroundAppModelView struct {
-	ModelID     string `json:"model_id"`
-	DisplayName string `json:"display_name"`
-	PriceLabel  string `json:"price_label"`
-	UnitHint    string `json:"unit_hint"`
-	Description string `json:"description"`
-	SortOrder   int    `json:"sort_order"`
+	ModelID       string `json:"model_id"`
+	DisplayName   string `json:"display_name"`
+	PriceLabel    string `json:"price_label"`
+	UnitHint      string `json:"unit_hint"`
+	Description   string `json:"description"`
+	SortOrder     int    `json:"sort_order"`
+	MonitorStatus string `json:"monitor_status,omitempty"`
 }
 
 // PlaygroundAppGroupView 单个应用下某个绑定分组的注入配置：
@@ -155,12 +158,13 @@ func (h *APIKeyHandler) GetPlaygroundConfig(c *gin.Context) {
 			for _, m := range rg.Models {
 				modelIDs = append(modelIDs, m.ModelID)
 				modelViews = append(modelViews, PlaygroundAppModelView{
-					ModelID:     m.ModelID,
-					DisplayName: m.DisplayName,
-					PriceLabel:  m.PriceLabel,
-					UnitHint:    m.UnitHint,
-					Description: m.Description,
-					SortOrder:   m.SortOrder,
+					ModelID:       m.ModelID,
+					DisplayName:   m.DisplayName,
+					PriceLabel:    m.PriceLabel,
+					UnitHint:      m.UnitHint,
+					Description:   m.Description,
+					SortOrder:     m.SortOrder,
+					MonitorStatus: m.MonitorStatus,
 				})
 			}
 			if len(modelIDs) == 0 {

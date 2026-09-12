@@ -113,6 +113,8 @@
             v-for="item in personalNavItems"
             :key="item.path"
             :to="item.path"
+            :target="PLAYGROUND_NEW_TAB_PATHS.has(item.path) ? '_blank' : undefined"
+            :rel="PLAYGROUND_NEW_TAB_PATHS.has(item.path) ? 'noopener' : undefined"
             class="sidebar-link mb-1"
             :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
             :title="sidebarCollapsed ? item.label : undefined"
@@ -133,6 +135,8 @@
             v-for="item in userNavItems"
             :key="item.path"
             :to="item.path"
+            :target="PLAYGROUND_NEW_TAB_PATHS.has(item.path) ? '_blank' : undefined"
+            :rel="PLAYGROUND_NEW_TAB_PATHS.has(item.path) ? 'noopener' : undefined"
             class="sidebar-link mb-1"
             :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
             :title="sidebarCollapsed ? item.label : undefined"
@@ -923,6 +927,10 @@ function toggleTheme() {
 function closeMobile() {
   appStore.setMobileOpen(false)
 }
+
+// fork: 集成工作台三个入口（对话/生图/画布）在新标签页打开，
+// 支持多个工作台并行使用，且不占用主站当前标签页。
+const PLAYGROUND_NEW_TAB_PATHS = new Set<string>(['/chat', '/image', '/canvas'])
 
 function handleMenuItemClick(itemPath: string) {
   if (mobileOpen.value) {

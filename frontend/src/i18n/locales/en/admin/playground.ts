@@ -34,10 +34,14 @@ export default {
       priceLabel: 'Price label',
       unitHint: 'Unit hint',
       description: 'Description',
+      monitor: 'Channel monitor',
       sortOrder: 'Order',
       enabled: 'Enabled',
       actions: 'Actions'
     },
+    monitorNone: 'None',
+    monitorHint:
+      'When linked, the model shows a channel status tag (available / down) in Chat / Image / Canvas',
     priceHint:
       'Display name and price label are display-only and never affect billing; billing still follows group multipliers and pricing rules',
     selectAll: 'Select all',

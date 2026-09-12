@@ -90,6 +90,39 @@ export interface PlaygroundInjectedModel {
   price_label?: string
   unit_hint?: string
   description?: string
+  /**
+   * 渠道监控最近检测状态（operational/degraded/failed/error）。
+   * 空串/缺省 = 未关联监控或无检测数据，工作台不展示状态标签。
+   */
+  monitor_status?: string
+}
+
+/** 渠道监控状态 → 展示标签（彩色圆点 + 短文案，附加在模型名后） */
+const MONITOR_STATUS_TAG: Record<string, string> = {
+  operational: '🟢 可用',
+  degraded: '🟡 降级',
+  failed: '🔴 异常',
+  error: '🔴 异常'
+}
+
+/**
+ * 根据监控状态返回附加在模型名后的状态标签；无状态返回空串。
+ * 三个工作台（对话/生图/画布）都渲染 display_name，因此把标签 bake 进
+ * display_name 即可在所有模型展示位（选择器/顶栏/列表）统一出现。
+ */
+export function monitorStatusTag(status?: string): string {
+  if (!status) return ''
+  return MONITOR_STATUS_TAG[status] ?? ''
+}
+
+/**
+ * 拼接展示名与状态标签，供注入时统一使用。
+ */
+export function withMonitorStatusTag(displayName?: string, status?: string): string {
+  const tag = monitorStatusTag(status)
+  const base = (displayName ?? '').trim()
+  if (!tag) return base
+  return base ? `${base} ${tag}` : tag
 }
 
 /** 注入给工作台的单个分组/渠道 */

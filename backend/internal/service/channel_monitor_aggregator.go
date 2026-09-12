@@ -293,3 +293,50 @@ func mergeModelDetails(
 	}
 	return out
 }
+
+// PlaygroundStatusIndex 工作台模型状态标签用的监控索引（monitorID → 用户视图）。
+//
+// 与用户监控页同一门控（Enabled 且 mode=v1）：v2 模式下主动探针已停，
+// latest 会越来越旧，展示会造成误导，因此 v2 模式返回空 map（不下发状态）。
+// 失败时返回空 map（仅日志），不影响工作台配置下发。
+func (s *ChannelMonitorService) PlaygroundStatusIndex(ctx context.Context) map[int64]*UserMonitorView {
+	out := make(map[int64]*UserMonitorView)
+	if s == nil {
+		return out
+	}
+	rt := s.probeRuntime(ctx)
+	if !rt.Enabled || rt.Mode != ChannelMonitorModeV1 {
+		return out
+	}
+	views, err := s.ListUserView(ctx)
+	if err != nil {
+		slog.Warn("channel_monitor: playground status index failed", "error", err)
+		return out
+	}
+	for _, v := range views {
+		out[v.ID] = v
+	}
+	return out
+}
+
+// ResolveMonitorModelStatus 按模型名从监控视图解析状态标签值。
+//
+// 匹配顺序：主模型精确匹配 → 附加模型精确匹配 → 主模型状态兜底 → 空串（未知）。
+// 状态取值：operational / degraded / failed / error；空串表示无检测数据。
+func ResolveMonitorModelStatus(view *UserMonitorView, modelID string) string {
+	if view == nil || modelID == "" {
+		return ""
+	}
+	if view.PrimaryModel == modelID && view.PrimaryStatus != "" {
+		return view.PrimaryStatus
+	}
+	for _, e := range view.ExtraModels {
+		if e.Model == modelID && e.Status != "" {
+			return e.Status
+		}
+	}
+	if view.PrimaryStatus != "" {
+		return view.PrimaryStatus
+	}
+	return ""
+}

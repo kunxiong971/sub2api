@@ -76,8 +76,13 @@ type PlaygroundAppModel struct {
 	Description string    `json:"description"`
 	Enabled     bool      `json:"enabled"`
 	SortOrder   int       `json:"sort_order"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// MonitorID 可选关联的渠道监控（展示层软引用，仅用于下发状态标签）。
+	MonitorID *int64 `json:"monitor_id,omitempty"`
+	// MonitorStatus 关联监控的最近检测状态（下发时快照）：
+	// operational / degraded / failed / error；空串 = 未关联或无检测数据。
+	MonitorStatus string    `json:"monitor_status,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // PlaygroundAppConfig 单个「应用 × 分组」绑定。
@@ -136,21 +141,25 @@ type PlaygroundRuntimeApp struct {
 
 // PlaygroundConfigService 工作台注入配置服务。
 type PlaygroundConfigService struct {
-	repo         PlaygroundConfigRepository
-	adminService AdminService
-	groupRepo    GroupRepository
+	repo           PlaygroundConfigRepository
+	adminService   AdminService
+	groupRepo      GroupRepository
+	monitorService *ChannelMonitorService
 }
 
 // NewPlaygroundConfigService 创建工作台注入配置服务。
+// monitorService 可为 nil（测试场景）：nil 时模型状态标签不下发。
 func NewPlaygroundConfigService(
 	repo PlaygroundConfigRepository,
 	adminService AdminService,
 	groupRepo GroupRepository,
+	monitorService *ChannelMonitorService,
 ) *PlaygroundConfigService {
 	return &PlaygroundConfigService{
-		repo:         repo,
-		adminService: adminService,
-		groupRepo:    groupRepo,
+		repo:           repo,
+		adminService:   adminService,
+		groupRepo:      groupRepo,
+		monitorService: monitorService,
 	}
 }
 
@@ -279,6 +288,7 @@ func (s *PlaygroundConfigService) ListEnabledApps(ctx context.Context) (map[stri
 					enabledModels = append(enabledModels, m)
 				}
 			}
+			s.enrichMonitorStatuses(ctx, enabledModels)
 			groups = append(groups, PlaygroundRuntimeGroup{
 				GroupID: c.GroupID,
 				Models:  enabledModels,
@@ -295,6 +305,7 @@ func (s *PlaygroundConfigService) ListEnabledApps(ctx context.Context) (map[stri
 }
 
 // normalizeModels 归一化模型清单：去空、去重、裁剪展示字段。
+// 注意：MonitorID 仅做引用透传，不在归一化时校验存在性（监控被删由 DB 置空）。
 func (s *PlaygroundConfigService) normalizeModels(models []PlaygroundAppModel) []PlaygroundAppModel {
 	normalized := make([]PlaygroundAppModel, 0, len(models))
 	seen := make(map[string]struct{}, len(models))
@@ -311,9 +322,36 @@ func (s *PlaygroundConfigService) normalizeModels(models []PlaygroundAppModel) [
 		m.PriceLabel = strings.TrimSpace(m.PriceLabel)
 		m.UnitHint = strings.TrimSpace(m.UnitHint)
 		m.Description = strings.TrimSpace(m.Description)
+		if m.MonitorID != nil && *m.MonitorID <= 0 {
+			m.MonitorID = nil
+		}
 		normalized = append(normalized, m)
 	}
 	return normalized
+}
+
+// enrichMonitorStatuses 为关联了渠道监控的模型填充最近检测状态（monitor_status）。
+// 状态在配置下发时快照；监控功能关闭/非 v1 模式/查询失败时保持为空（前端不展示标签）。
+func (s *PlaygroundConfigService) enrichMonitorStatuses(ctx context.Context, models []PlaygroundAppModel) {
+	needed := make([]int64, 0, len(models))
+	for i := range models {
+		if models[i].MonitorID != nil {
+			needed = append(needed, *models[i].MonitorID)
+		}
+	}
+	if len(needed) == 0 {
+		return
+	}
+	index := s.monitorService.PlaygroundStatusIndex(ctx)
+	if len(index) == 0 {
+		return
+	}
+	for i := range models {
+		if models[i].MonitorID == nil {
+			continue
+		}
+		models[i].MonitorStatus = ResolveMonitorModelStatus(index[*models[i].MonitorID], models[i].ModelID)
+	}
 }
 
 // groupDisplayIndex 构建分组展示信息索引，供管理页显示分组名与平台。

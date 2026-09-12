@@ -15,6 +15,7 @@ import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
+import { channelMonitorAPI } from '@/api/admin/channelMonitor'
 import type { AdminGroup } from '@/types'
 import {
   playgroundAdminAPI,
@@ -38,6 +39,14 @@ interface ModelRow {
   description: string
   enabled: boolean
   sort_order: number
+  monitor_id: number | null
+}
+
+interface MonitorOption {
+  id: number
+  name: string
+  group_name: string
+  primary_model: string
 }
 
 interface BindingRow {
@@ -49,10 +58,27 @@ interface BindingRow {
 const activeTab = ref<AppKey>('chat')
 const loading = ref(false)
 const groups = ref<AdminGroup[]>([])
+const monitors = ref<MonitorOption[]>([])
 const forms = reactive<Record<AppKey, BindingRow[]>>({ chat: [], image: [], canvas: [] })
 const pendingGroupId = ref<number | null>(null)
 const saving = ref(false)
 const fetchingGroup = ref<number | null>(null)
+
+async function loadMonitors() {
+  try {
+    const res = await channelMonitorAPI.list({ enabled: true, page_size: 200 })
+    monitors.value = (res.items ?? []).map((m) => ({
+      id: m.id,
+      name: m.name,
+      group_name: m.group_name,
+      primary_model: m.primary_model
+    }))
+  } catch (error) {
+    // 监控列表拉取失败不阻塞配置页；下拉为空即可
+    console.error('Failed to load channel monitors:', error)
+    monitors.value = []
+  }
+}
 
 const tabs = computed(() => [
   { key: 'chat' as AppKey, label: t('admin.playground.tabs.chat') },
@@ -62,6 +88,12 @@ const tabs = computed(() => [
 
 const groupName = (id: number) => groups.value.find((g) => g.id === id)?.name ?? `#${id}`
 const groupPlatform = (id: number) => groups.value.find((g) => g.id === id)?.platform ?? ''
+
+const monitorOptionTitle = (id: number | null) => {
+  if (!id) return ''
+  const mo = monitors.value.find((m) => m.id === id)
+  return mo ? `${mo.group_name} · ${mo.primary_model}` : ''
+}
 
 const addableOptions = computed(() => {
   const bound = new Set(forms[activeTab.value].map((b) => b.group_id))
@@ -84,7 +116,8 @@ function applyBundle(bundle: PlaygroundAppBundle) {
       unit_hint: m.unit_hint,
       description: m.description,
       enabled: m.enabled,
-      sort_order: m.sort_order
+      sort_order: m.sort_order,
+      monitor_id: m.monitor_id ?? null
     }))
   }))
 }
@@ -98,6 +131,7 @@ async function loadData() {
     ])
     groups.value = allGroups
     apps.forEach(applyBundle)
+    void loadMonitors()
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, t('admin.playground.errors.loadFailed')))
     console.error('Failed to load playground configs:', error)
@@ -139,7 +173,8 @@ async function fetchModels(groupId: number) {
         unit_hint: '',
         description: '',
         enabled: true,
-        sort_order: base + added
+        sort_order: base + added,
+        monitor_id: null
       })
     })
     if (added === 0) {
@@ -169,7 +204,8 @@ async function saveAll() {
           unit_hint: m.unit_hint,
           description: m.description,
           enabled: m.enabled,
-          sort_order: m.sort_order || idx + 1
+          sort_order: m.sort_order || idx + 1,
+          monitor_id: m.monitor_id
         }))
     }))
     const bundle = await playgroundAdminAPI.updateConfig(app, bindings)
@@ -324,6 +360,7 @@ onMounted(loadData)
                   <th class="px-3 py-2 font-medium">{{ t('admin.playground.col.priceLabel') }}</th>
                   <th class="px-3 py-2 font-medium">{{ t('admin.playground.col.unitHint') }}</th>
                   <th class="px-3 py-2 font-medium">{{ t('admin.playground.col.description') }}</th>
+                  <th class="px-3 py-2 font-medium">{{ t('admin.playground.col.monitor') }}</th>
                   <th class="w-16 px-3 py-2 font-medium">{{ t('admin.playground.col.sortOrder') }}</th>
                   <th class="w-14 px-3 py-2 font-medium">{{ t('admin.playground.col.enabled') }}</th>
                 </tr>
@@ -368,6 +405,18 @@ onMounted(loadData)
                       type="text"
                       class="input h-7 w-40 px-2 py-0.5 text-xs"
                     />
+                  </td>
+                  <td class="px-3 py-2">
+                    <select
+                      v-model="row.monitor_id"
+                      class="input h-7 w-36 px-1.5 py-0.5 text-xs"
+                      :title="monitorOptionTitle(row.monitor_id)"
+                    >
+                      <option :value="null">{{ t('admin.playground.monitorNone') }}</option>
+                      <option v-for="mo in monitors" :key="mo.id" :value="mo.id">
+                        {{ mo.name }}（{{ mo.primary_model }}）
+                      </option>
+                    </select>
                   </td>
                   <td class="px-3 py-2">
                     <input

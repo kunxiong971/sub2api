@@ -32,10 +32,13 @@ export default {
       priceLabel: '价格标签',
       unitHint: '计价单位',
       description: '说明',
+      monitor: '渠道监控',
       sortOrder: '排序',
       enabled: '启用',
       actions: '操作'
     },
+    monitorNone: '不关联',
+    monitorHint: '关联后，对话/生图/画布里该模型会带上渠道状态标签（可用/异常）',
     priceHint: '展示名与价格标签只用于客户界面展示，不参与实际计费；计费仍按分组倍率与计价体系',
     selectAll: '全选',
     selectedCount: '已选 {count} 个模型',

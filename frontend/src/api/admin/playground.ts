@@ -18,6 +18,8 @@ export interface PlaygroundAppModelConfig {
   description: string
   enabled: boolean
   sort_order: number
+  /** 可选关联的渠道监控（用于下发模型状态标签） */
+  monitor_id: number | null
   created_at: string
   updated_at: string
 }
@@ -44,6 +46,8 @@ export interface PlaygroundAppModelInput {
   description?: string
   enabled?: boolean
   sort_order?: number
+  /** 可选关联的渠道监控 ID */
+  monitor_id?: number | null
 }
 
 export interface PlaygroundBindingInput {

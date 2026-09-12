@@ -158,3 +158,8 @@ output/
 .vite/
 # 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
 /plugins/
+
+# fork: 本地工具缓存与临时目录（不进仓库）
+.playwright-cli/
+.tmp-mail/
+chat-fixed.png

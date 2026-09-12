@@ -26,6 +26,7 @@ import {
   PLAYGROUND_THEME_MESSAGE_TYPE,
   normalizePlaygroundBase,
   resolvePlaygroundBase,
+  withMonitorStatusTag,
   type PlaygroundAppKey,
   type PlaygroundInjectedConfig,
   type PlaygroundInjectedGroup,
@@ -104,10 +105,13 @@ function buildInjectedGroup(
   const usePgw = appMeta.value.usePgwProxy && !!config.value?.pgw_base_url && !!group.pgw_token
   const models: PlaygroundInjectedModel[] = (modelInfos ?? []).map((m) => ({
     model_id: m.model_id,
-    display_name: m.display_name,
+    // 状态标签 bake 进 display_name，三个工作台渲染模型名时统一显示。
+    // 未配置展示名时以 model_id 兜底，避免展示名只剩状态标签（如「🟢 可用」）而丢失模型名。
+    display_name: withMonitorStatusTag(m.display_name || m.model_id, m.monitor_status),
     price_label: m.price_label,
     unit_hint: m.unit_hint,
-    description: m.description
+    description: m.description,
+    monitor_status: m.monitor_status ?? ''
   }))
   return {
     groupName: group.name,
@@ -312,12 +316,57 @@ onMounted(() => {
   window.addEventListener('message', handleBridgeAck)
   watchPanelTheme()
 })
+// fork: 注入相关配置的指纹（分组 / 模型展示名 / 价格 / 监控状态）。
+// URL 参数注入模式（生图工作台）无法像 postMessage 一样原地更新配置，
+// 仅当指纹确实变化时才重建 iframe，避免无谓重载丢失子应用内的编辑状态。
+function configFingerprint(cfg: PlaygroundConfig | null): string {
+  if (!cfg) return ''
+  const apps = (cfg.apps ?? [])
+    .map((a) => {
+      const groups = (a.groups ?? [])
+        .map((g) => {
+          const models = (g.models ?? [])
+            .map(
+              (m) =>
+                `${m.model_id}@${m.display_name ?? ''}@${m.price_label ?? ''}@${m.unit_hint ?? ''}@${m.monitor_status ?? ''}`
+            )
+            .join('|')
+          return `${g.group?.id}[${models}]`
+        })
+        .join(';')
+      return `${a.app}:${groups}`
+    })
+    .join('||')
+  return `${cfg.gateway_base_url ?? ''}|${cfg.pgw_base_url ?? ''}|${apps}`
+}
+
+// fork: keep-alive 场景下静默拉取最新配置并重注入（不整页重载）。
+// 渠道监控状态等为「下发时快照」，若切回后只重发旧配置，后台变更（模型状态标签、
+// 模型清单、价格标签）不会生效：
+// - postMessage 模式（lobe/画布）：原地重发即可让子应用刷新模型展示名；
+// - URL 参数模式（生图工作台）：配置有变化时才重建 iframe 以注入新参数。
+async function refreshConfigAndReinject() {
+  try {
+    const data = await getPlaygroundConfig()
+    const changed = configFingerprint(config.value) !== configFingerprint(data)
+    config.value = data
+    if (appMeta.value.injectMode === 'postMessage') {
+      startPostMessage()
+    } else if (changed) {
+      render()
+    }
+  } catch {
+    // 静默失败：保持现有配置，不影响已渲染的工作台
+  }
+}
+
 // fork: keep-alive 恢复（从其他页面切回）：iframe 仍在后台运行，无需重建。
-// 幂等重发配置注入与主题，确保管理后台的配置变更切回后即时生效。
+// 先按当前配置即时重注入 + 同步主题，再异步拉取最新配置覆盖重注入。
 onActivated(() => {
   if (config.value) {
     startPostMessage()
     broadcastTheme()
+    void refreshConfigAndReinject()
   }
 })
 onBeforeUnmount(() => {

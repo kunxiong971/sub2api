@@ -24,6 +24,11 @@ export interface PlaygroundAppModelInfo {
   unit_hint: string
   description: string
   sort_order: number
+  /**
+   * 关联渠道监控的最近检测状态（下发时快照）：
+   * operational / degraded / failed / error；空串/缺省 = 未关联或无检测数据
+   */
+  monitor_status?: string
 }
 
 /** 单个应用下某个绑定分组的注入配置 */

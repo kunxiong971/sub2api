@@ -23,6 +23,7 @@ func NewPlaygroundHandler(playgroundConfigService *service.PlaygroundConfigServi
 }
 
 // playgroundAppModelInput 单条模型展示配置。
+// MonitorID 可选关联的渠道监控（用于下发模型状态标签）。
 type playgroundAppModelInput struct {
 	ModelID     string `json:"model_id"`
 	DisplayName string `json:"display_name"`
@@ -31,6 +32,7 @@ type playgroundAppModelInput struct {
 	Description string `json:"description"`
 	Enabled     *bool  `json:"enabled"`
 	SortOrder   int    `json:"sort_order"`
+	MonitorID   *int64 `json:"monitor_id"`
 }
 
 // playgroundBindingInput 单个分组绑定的保存输入。
@@ -92,6 +94,7 @@ func (h *PlaygroundHandler) UpdatePlaygroundConfig(c *gin.Context) {
 				Description: m.Description,
 				Enabled:     enabled,
 				SortOrder:   m.SortOrder,
+				MonitorID:   m.MonitorID,
 			})
 		}
 		bindings = append(bindings, service.PlaygroundBindingInput{
