@@ -329,7 +329,7 @@ function configFingerprint(cfg: PlaygroundConfig | null): string {
           const models = (g.models ?? [])
             .map(
               (m) =>
-                `${m.model_id}@${m.display_name ?? ''}@${m.price_label ?? ''}@${m.unit_hint ?? ''}@${m.monitor_status ?? ''}`
+                `${m.model_id}@${m.display_name ?? ''}@${m.price_label ?? ''}@${m.unit_hint ?? ''}@${m.model_kind ?? ''}@${m.monitor_status ?? ''}`
             )
             .join('|')
           return `${g.group?.id}[${models}]`
