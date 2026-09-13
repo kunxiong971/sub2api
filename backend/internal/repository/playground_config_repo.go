@@ -184,3 +184,100 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())`,
 	committed = true
 	return nil
 }
+
+const playgroundGlobalModelSelectColumns = `id, model_id, display_name, price_label,
+unit_hint, description, model_kind, enabled, sort_order, monitor_id, created_at, updated_at`
+
+func scanPlaygroundGlobalModel(scan func(dest ...any) error) (*service.PlaygroundGlobalModel, error) {
+	m := &service.PlaygroundGlobalModel{}
+	if err := scan(
+		&m.ID,
+		&m.ModelID,
+		&m.DisplayName,
+		&m.PriceLabel,
+		&m.UnitHint,
+		&m.Description,
+		&m.ModelKind,
+		&m.Enabled,
+		&m.SortOrder,
+		&m.MonitorID,
+		&m.CreatedAt,
+		&m.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// ListGlobalModels 全局模型库清单（按排序）。
+func (r *playgroundConfigRepository) ListGlobalModels(ctx context.Context) ([]service.PlaygroundGlobalModel, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("nil playground config repository")
+	}
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT "+playgroundGlobalModelSelectColumns+"\nFROM playground_global_models\nORDER BY sort_order, id")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	models := make([]service.PlaygroundGlobalModel, 0)
+	for rows.Next() {
+		m, err := scanPlaygroundGlobalModel(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		models = append(models, *m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return models, nil
+}
+
+// ReplaceGlobalModels 全量替换全局模型库（事务内：先删后插）。
+func (r *playgroundConfigRepository) ReplaceGlobalModels(ctx context.Context, models []service.PlaygroundGlobalModel) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("nil playground config repository")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM playground_global_models"); err != nil {
+		return err
+	}
+	for _, m := range models {
+		if strings.TrimSpace(m.ModelID) == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO playground_global_models
+  (model_id, display_name, price_label, unit_hint, description, model_kind, enabled, sort_order, monitor_id, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())`,
+			truncateString(m.ModelID, 160),
+			truncateString(m.DisplayName, 160),
+			truncateString(m.PriceLabel, 160),
+			truncateString(m.UnitHint, 160),
+			strings.TrimSpace(m.Description),
+			truncateString(m.ModelKind, 20),
+			m.Enabled,
+			m.SortOrder,
+			m.MonitorID,
+		); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}

@@ -6,8 +6,15 @@ export default {
     tabs: {
       chat: 'Chat',
       image: 'Image',
-      canvas: 'Canvas'
+      canvas: 'Canvas',
+      global: 'Global models'
     },
+    globalHint:
+      'Maintain one model list here — after marking the kind, models are injected automatically: Chat gets "Chat (LLM)"; Image and Canvas get "Chat (LLM) + Image". App tabs only need group bindings.',
+    globalTitle: 'Global models ({count})',
+    globalAdd: 'Add model',
+    globalRemove: 'Remove',
+    globalEmpty: 'No global models yet — click "Add model" to start',
     basic: 'Basic',
     addGroup: 'Add group',
     removeGroup: 'Remove',

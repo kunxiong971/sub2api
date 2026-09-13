@@ -146,3 +146,65 @@ func (h *PlaygroundHandler) GetPlaygroundModelCandidates(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"models": models})
 }
+
+// playgroundGlobalModelInput 全局模型库的单条输入。
+type playgroundGlobalModelInput struct {
+	ModelID     string `json:"model_id"`
+	DisplayName string `json:"display_name"`
+	PriceLabel  string `json:"price_label"`
+	UnitHint    string `json:"unit_hint"`
+	Description string `json:"description"`
+	ModelKind   string `json:"model_kind"`
+	Enabled     *bool  `json:"enabled"`
+	SortOrder   int    `json:"sort_order"`
+	MonitorID   *int64 `json:"monitor_id"`
+}
+
+// ListGlobalModels 全局模型库清单。
+// GET /api/v1/admin/playground/global-models
+func (h *PlaygroundHandler) ListGlobalModels(c *gin.Context) {
+	models, err := h.playgroundConfigService.ListGlobalModels(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"models": models})
+}
+
+// UpdateGlobalModels 全量保存全局模型库。
+// PUT /api/v1/admin/playground/global-models
+func (h *PlaygroundHandler) UpdateGlobalModels(c *gin.Context) {
+	var req struct {
+		Models []playgroundGlobalModelInput `json:"models"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+
+	models := make([]service.PlaygroundGlobalModel, 0, len(req.Models))
+	for _, m := range req.Models {
+		enabled := true
+		if m.Enabled != nil {
+			enabled = *m.Enabled
+		}
+		models = append(models, service.PlaygroundGlobalModel{
+			ModelID:     m.ModelID,
+			DisplayName: m.DisplayName,
+			PriceLabel:  m.PriceLabel,
+			UnitHint:    m.UnitHint,
+			Description: m.Description,
+			ModelKind:   m.ModelKind,
+			Enabled:     enabled,
+			SortOrder:   m.SortOrder,
+			MonitorID:   m.MonitorID,
+		})
+	}
+
+	saved, err := h.playgroundConfigService.UpdateGlobalModels(c.Request.Context(), models)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"models": saved})
+}

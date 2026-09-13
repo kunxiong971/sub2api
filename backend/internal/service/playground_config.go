@@ -119,6 +119,26 @@ type PlaygroundConfigRepository interface {
 	ListModelsByAppConfig(ctx context.Context, appConfigID int64) ([]PlaygroundAppModel, error)
 	// ReplaceApp 全量替换某应用的所有绑定（含每个绑定下的模型清单），事务内完成。
 	ReplaceApp(ctx context.Context, app string, cfgs []PlaygroundAppConfig) error
+	// ListGlobalModels 全局模型库：模型展示信息只维护一份，各工作台按类型自动注入。
+	ListGlobalModels(ctx context.Context) ([]PlaygroundGlobalModel, error)
+	// ReplaceGlobalModels 全量替换全局模型库，事务内完成。
+	ReplaceGlobalModels(ctx context.Context, models []PlaygroundGlobalModel) error
+}
+
+// PlaygroundGlobalModel 全局模型库条目：维护一份展示信息，各工作台按类型自动注入。
+type PlaygroundGlobalModel struct {
+	ID          int64     `json:"id"`
+	ModelID     string    `json:"model_id"`
+	DisplayName string    `json:"display_name"`
+	PriceLabel  string    `json:"price_label"`
+	UnitHint    string    `json:"unit_hint"`
+	Description string    `json:"description"`
+	ModelKind   string    `json:"model_kind"`
+	Enabled     bool      `json:"enabled"`
+	SortOrder   int       `json:"sort_order"`
+	MonitorID   *int64    `json:"monitor_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // PlaygroundBindingView 管理端总览：单个分组绑定 + 模型展示清单。
@@ -270,11 +290,19 @@ func (s *PlaygroundConfigService) GetModelCandidates(ctx context.Context, groupI
 }
 
 // ListEnabledApps 返回当前启用且绑定分组的所有应用配置（按 app 索引）。
+//
+// fork: 模型来源 = 全局模型库（按 app 允许的类型过滤）∪ 应用层手工清单（历史数据，去重）。
+// 全局库让模型展示信息只维护一份、各工作台按类型自动注入；应用层清单保留作精细覆盖。
 func (s *PlaygroundConfigService) ListEnabledApps(ctx context.Context) (map[string]PlaygroundRuntimeApp, error) {
 	cfgs, err := s.repo.ListAppConfigs(ctx)
 	if err != nil {
 		return nil, err
 	}
+	globalModels, gErr := s.repo.ListGlobalModels(ctx)
+	if gErr != nil {
+		return nil, gErr
+	}
+
 	byApp := make(map[string][]*PlaygroundAppConfig)
 	for i := range cfgs {
 		c := &cfgs[i]
@@ -287,22 +315,19 @@ func (s *PlaygroundConfigService) ListEnabledApps(ctx context.Context) (map[stri
 
 	out := make(map[string]PlaygroundRuntimeApp, len(byApp))
 	for app, appCfgs := range byApp {
+		// 该应用允许注入的全局模型（按类型过滤；未标记全量注入，由工作台前端兜底分流）
+		globalForApp := filterGlobalModelsForApp(globalModels, app)
 		groups := make([]PlaygroundRuntimeGroup, 0, len(appCfgs))
 		for _, c := range appCfgs {
 			models, mErr := s.repo.ListModelsByAppConfig(ctx, c.ID)
 			if mErr != nil {
 				return nil, mErr
 			}
-			enabledModels := make([]PlaygroundAppModel, 0, len(models))
-			for _, m := range models {
-				if m.Enabled {
-					enabledModels = append(enabledModels, m)
-				}
-			}
-			s.enrichMonitorStatuses(ctx, enabledModels)
+			merged := mergeGlobalAndAppModels(globalForApp, models)
+			s.enrichMonitorStatuses(ctx, merged)
 			groups = append(groups, PlaygroundRuntimeGroup{
 				GroupID: c.GroupID,
-				Models:  enabledModels,
+				Models:  merged,
 			})
 		}
 		injectMode := DefaultPlaygroundInjectMode(app)
@@ -313,6 +338,118 @@ func (s *PlaygroundConfigService) ListEnabledApps(ctx context.Context) (map[stri
 		}
 	}
 	return out, nil
+}
+
+// playgroundAppAllowedKinds 各工作台允许注入的模型类型（「需要什么注入什么」）：
+//   - chat（对话）      → chat
+//   - image（生图）     → chat + image（Agent 模式需要 LLM）
+//   - canvas（画布）    → chat + image（文本节点需要 LLM）
+func playgroundAppAllowedKinds(app string) map[string]bool {
+	switch NormalizePlaygroundApp(app) {
+	case "chat":
+		return map[string]bool{ModelKindChat: true}
+	case "image", "canvas":
+		return map[string]bool{ModelKindChat: true, ModelKindImage: true}
+	default:
+		return map[string]bool{}
+	}
+}
+
+// filterGlobalModelsForApp 把全局库按应用允许的类型过滤成运行时模型清单。
+// 未标记（空 kind）的模型全量注入，由各工作台前端按模型名兜底分流。
+func filterGlobalModelsForApp(all []PlaygroundGlobalModel, app string) []PlaygroundAppModel {
+	allowed := playgroundAppAllowedKinds(app)
+	out := make([]PlaygroundAppModel, 0, len(all))
+	for _, g := range all {
+		if !g.Enabled {
+			continue
+		}
+		kind := normalizeModelKind(g.ModelKind)
+		if kind != "" && !allowed[kind] {
+			continue
+		}
+		out = append(out, PlaygroundAppModel{
+			ModelID:     strings.TrimSpace(g.ModelID),
+			DisplayName: strings.TrimSpace(g.DisplayName),
+			PriceLabel:  strings.TrimSpace(g.PriceLabel),
+			UnitHint:    strings.TrimSpace(g.UnitHint),
+			Description: strings.TrimSpace(g.Description),
+			Enabled:     true,
+			SortOrder:   g.SortOrder,
+			ModelKind:   kind,
+			MonitorID:   g.MonitorID,
+		})
+	}
+	return out
+}
+
+// mergeGlobalAndAppModels 合并全局库与应用层清单：按 model_id 去重，全局库优先。
+func mergeGlobalAndAppModels(global []PlaygroundAppModel, appModels []PlaygroundAppModel) []PlaygroundAppModel {
+	seen := make(map[string]struct{}, len(global)+len(appModels))
+	out := make([]PlaygroundAppModel, 0, len(global)+len(appModels))
+	for _, m := range global {
+		if m.ModelID == "" {
+			continue
+		}
+		if _, dup := seen[m.ModelID]; dup {
+			continue
+		}
+		seen[m.ModelID] = struct{}{}
+		out = append(out, m)
+	}
+	for _, m := range appModels {
+		if !m.Enabled || strings.TrimSpace(m.ModelID) == "" {
+			continue
+		}
+		if _, dup := seen[m.ModelID]; dup {
+			continue
+		}
+		seen[m.ModelID] = struct{}{}
+		out = append(out, m)
+	}
+	return out
+}
+
+// ListGlobalModels 管理端：全局模型库清单（按排序）。
+func (s *PlaygroundConfigService) ListGlobalModels(ctx context.Context) ([]PlaygroundGlobalModel, error) {
+	models, err := s.repo.ListGlobalModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if models == nil {
+		models = []PlaygroundGlobalModel{}
+	}
+	return models, nil
+}
+
+// UpdateGlobalModels 管理端：全量替换全局模型库（归一化 + 按 model_id 去重后写入）。
+func (s *PlaygroundConfigService) UpdateGlobalModels(ctx context.Context, models []PlaygroundGlobalModel) ([]PlaygroundGlobalModel, error) {
+	normalized := make([]PlaygroundGlobalModel, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
+	for i := range models {
+		m := models[i]
+		m.ModelID = strings.TrimSpace(m.ModelID)
+		if m.ModelID == "" {
+			continue
+		}
+		if _, dup := seen[m.ModelID]; dup {
+			continue
+		}
+		seen[m.ModelID] = struct{}{}
+		m.DisplayName = strings.TrimSpace(m.DisplayName)
+		m.PriceLabel = strings.TrimSpace(m.PriceLabel)
+		m.UnitHint = strings.TrimSpace(m.UnitHint)
+		m.Description = strings.TrimSpace(m.Description)
+		m.ModelKind = normalizeModelKind(m.ModelKind)
+		if m.MonitorID != nil && *m.MonitorID <= 0 {
+			m.MonitorID = nil
+		}
+		normalized = append(normalized, m)
+	}
+	if err := s.repo.ReplaceGlobalModels(ctx, normalized); err != nil {
+		return nil, err
+	}
+	return s.ListGlobalModels(ctx)
 }
 
 // normalizeModels 归一化模型清单：去空、去重、裁剪展示字段。

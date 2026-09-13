@@ -60,6 +60,34 @@ export interface PlaygroundBindingInput {
   models: PlaygroundAppModelInput[]
 }
 
+/** 全局模型库条目：模型展示信息只维护一份，各工作台按类型自动注入 */
+export interface PlaygroundGlobalModelConfig {
+  id: number
+  model_id: string
+  display_name: string
+  price_label: string
+  unit_hint: string
+  description: string
+  model_kind: string
+  enabled: boolean
+  sort_order: number
+  monitor_id: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PlaygroundGlobalModelInput {
+  model_id: string
+  display_name?: string
+  price_label?: string
+  unit_hint?: string
+  description?: string
+  model_kind?: string
+  enabled?: boolean
+  sort_order?: number
+  monitor_id?: number | null
+}
+
 /** 拉取三个应用的配置总览（每个应用含绑定的多个分组） */
 export async function listConfigs(
   options?: { signal?: AbortSignal }
@@ -95,10 +123,31 @@ export async function fetchModelCandidates(
   return data?.models ?? []
 }
 
+/** 全局模型库清单 */
+export async function listGlobalModels(): Promise<PlaygroundGlobalModelConfig[]> {
+  const { data } = await apiClient.get<{ models: PlaygroundGlobalModelConfig[] }>(
+    '/admin/playground/global-models'
+  )
+  return data?.models ?? []
+}
+
+/** 全量保存全局模型库 */
+export async function updateGlobalModels(
+  models: PlaygroundGlobalModelInput[]
+): Promise<PlaygroundGlobalModelConfig[]> {
+  const { data } = await apiClient.put<{ models: PlaygroundGlobalModelConfig[] }>(
+    '/admin/playground/global-models',
+    { models }
+  )
+  return data?.models ?? []
+}
+
 export const playgroundAdminAPI = {
   listConfigs,
   updateConfig,
-  fetchModelCandidates
+  fetchModelCandidates,
+  listGlobalModels,
+  updateGlobalModels
 }
 
 export default playgroundAdminAPI

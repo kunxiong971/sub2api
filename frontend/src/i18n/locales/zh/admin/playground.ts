@@ -5,8 +5,14 @@ export default {
     tabs: {
       chat: '对话',
       image: '生图',
-      canvas: '画布'
+      canvas: '画布',
+      global: '全局模型'
     },
+    globalHint: '在全局模型库维护一份模型清单：标记类型后按需自动注入 —— 对话工作台注入「LLM 对话」；生图/画布注入「LLM 对话 + 生图」。各工作台页签下只需维护分组绑定，不必重复添加模型。',
+    globalTitle: '全局模型（{count} 个）',
+    globalAdd: '添加模型',
+    globalRemove: '删除',
+    globalEmpty: '还没有全局模型，点击「添加模型」开始维护',
     basic: '基本配置',
     addGroup: '添加分组',
     removeGroup: '移除',
