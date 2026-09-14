@@ -14629,6 +14629,7 @@ type ChannelMonitorMutation struct {
 	extra_headers           *map[string]string
 	body_override_mode      *string
 	body_override           *map[string]interface{}
+	image_mode              *bool
 	clearedFields           map[string]struct{}
 	history                 map[int64]struct{}
 	removedhistory          map[int64]struct{}
@@ -15658,6 +15659,42 @@ func (m *ChannelMonitorMutation) ResetBodyOverride() {
 	delete(m.clearedFields, channelmonitor.FieldBodyOverride)
 }
 
+// SetImageMode sets the "image_mode" field.
+func (m *ChannelMonitorMutation) SetImageMode(b bool) {
+	m.image_mode = &b
+}
+
+// ImageMode returns the value of the "image_mode" field in the mutation.
+func (m *ChannelMonitorMutation) ImageMode() (r bool, exists bool) {
+	v := m.image_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldImageMode returns the old "image_mode" field's value of the ChannelMonitor entity.
+// If the ChannelMonitor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelMonitorMutation) OldImageMode(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldImageMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldImageMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldImageMode: %w", err)
+	}
+	return oldValue.ImageMode, nil
+}
+
+// ResetImageMode resets all changes to the "image_mode" field.
+func (m *ChannelMonitorMutation) ResetImageMode() {
+	m.image_mode = nil
+}
+
 // AddHistoryIDs adds the "history" edge to the ChannelMonitorHistory entity by ids.
 func (m *ChannelMonitorMutation) AddHistoryIDs(ids ...int64) {
 	if m.history == nil {
@@ -15840,7 +15877,7 @@ func (m *ChannelMonitorMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ChannelMonitorMutation) Fields() []string {
-	fields := make([]string, 0, 21)
+	fields := make([]string, 0, 22)
 	if m.created_at != nil {
 		fields = append(fields, channelmonitor.FieldCreatedAt)
 	}
@@ -15904,6 +15941,9 @@ func (m *ChannelMonitorMutation) Fields() []string {
 	if m.body_override != nil {
 		fields = append(fields, channelmonitor.FieldBodyOverride)
 	}
+	if m.image_mode != nil {
+		fields = append(fields, channelmonitor.FieldImageMode)
+	}
 	return fields
 }
 
@@ -15954,6 +15994,8 @@ func (m *ChannelMonitorMutation) Field(name string) (ent.Value, bool) {
 		return m.BodyOverrideMode()
 	case channelmonitor.FieldBodyOverride:
 		return m.BodyOverride()
+	case channelmonitor.FieldImageMode:
+		return m.ImageMode()
 	}
 	return nil, false
 }
@@ -16005,6 +16047,8 @@ func (m *ChannelMonitorMutation) OldField(ctx context.Context, name string) (ent
 		return m.OldBodyOverrideMode(ctx)
 	case channelmonitor.FieldBodyOverride:
 		return m.OldBodyOverride(ctx)
+	case channelmonitor.FieldImageMode:
+		return m.OldImageMode(ctx)
 	}
 	return nil, fmt.Errorf("unknown ChannelMonitor field %s", name)
 }
@@ -16160,6 +16204,13 @@ func (m *ChannelMonitorMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetBodyOverride(v)
+		return nil
+	case channelmonitor.FieldImageMode:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetImageMode(v)
 		return nil
 	}
 	return fmt.Errorf("unknown ChannelMonitor field %s", name)
@@ -16356,6 +16407,9 @@ func (m *ChannelMonitorMutation) ResetField(name string) error {
 		return nil
 	case channelmonitor.FieldBodyOverride:
 		m.ResetBodyOverride()
+		return nil
+	case channelmonitor.FieldImageMode:
+		m.ResetImageMode()
 		return nil
 	}
 	return fmt.Errorf("unknown ChannelMonitor field %s", name)

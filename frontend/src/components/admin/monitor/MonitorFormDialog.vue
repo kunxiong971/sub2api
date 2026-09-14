@@ -80,7 +80,7 @@
 
       <div v-if="form.provider === PROVIDER_OPENAI && usesProbePart" class="rounded-lg border border-blue-100 bg-blue-50/50 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
         <label class="input-label">{{ t('admin.channelMonitor.form.apiMode') }}</label>
-        <div class="grid gap-3 sm:grid-cols-2">
+        <div class="grid gap-3 sm:grid-cols-3">
           <button
             v-for="opt in apiModeOptions"
             :key="opt.value"
@@ -146,6 +146,15 @@
           :placeholder="t('admin.channelMonitor.form.extraModelsPlaceholder')"
           @update:models="form.extra_models = $event"
         />
+      </div>
+
+      <!-- 图片模型探活开关：生图响应无文本，开启后按「2xx + 响应体非空」判定 -->
+      <div v-if="usesProbePart" class="flex items-center justify-between gap-4">
+        <div>
+          <label class="input-label mb-0">{{ t('admin.channelMonitor.form.imageMode') }}</label>
+          <p class="mt-0.5 text-xs text-gray-400">{{ t('admin.channelMonitor.form.imageModeHint') }}</p>
+        </div>
+        <Toggle v-model="form.image_mode" />
       </div>
 
       <div>
@@ -271,6 +280,7 @@ import {
   PROVIDER_DEEPSEEK,
   PROVIDER_MINIMAX,
   API_MODE_CHAT_COMPLETIONS,
+  API_MODE_IMAGES,
   API_MODE_RESPONSES,
   CHECK_MODE_PROBE,
   CHECK_MODE_QUOTA,
@@ -335,6 +345,7 @@ interface MonitorForm {
   extra_headers: Record<string, string>
   body_override_mode: BodyOverrideMode
   body_override: Record<string, unknown> | null
+  image_mode: boolean
 }
 
 const form = reactive<MonitorForm>({
@@ -355,6 +366,7 @@ const form = reactive<MonitorForm>({
   extra_headers: {},
   body_override_mode: 'off',
   body_override: null,
+  image_mode: false,
 })
 
 // quota / quota_probe 需要关联账号；probe / quota_probe 需要探活字段。
@@ -432,10 +444,16 @@ const apiModeOptions = computed<{ value: APIMode; label: string; hint: string }[
     label: t('admin.channelMonitor.form.apiModeResponses'),
     hint: t('admin.channelMonitor.form.apiModeResponsesHint'),
   },
+  {
+    value: API_MODE_IMAGES,
+    label: t('admin.channelMonitor.form.apiModeImages'),
+    hint: t('admin.channelMonitor.form.apiModeImagesHint'),
+  },
 ])
 
 function normalizeAPIMode(mode: APIMode | undefined | null): APIMode {
-  return mode === API_MODE_RESPONSES ? API_MODE_RESPONSES : API_MODE_CHAT_COMPLETIONS
+  if (mode === API_MODE_RESPONSES || mode === API_MODE_IMAGES) return mode
+  return API_MODE_CHAT_COMPLETIONS
 }
 
 function apiModeButtonClass(mode: APIMode): string {
@@ -762,6 +780,7 @@ function loadFromMonitor(m: ChannelMonitor) {
   form.extra_headers = { ...(m.extra_headers || {}) }
   form.body_override_mode = m.body_override_mode || 'off'
   form.body_override = m.body_override ? { ...m.body_override } : null
+  form.image_mode = m.image_mode
   suppressFormWatchers = false
 }
 
@@ -830,6 +849,7 @@ function buildPayload(): CreateParams {
     extra_headers: form.extra_headers,
     body_override_mode: form.body_override_mode,
     body_override: form.body_override,
+    image_mode: usesProbePart.value ? form.image_mode : false,
   }
 }
 

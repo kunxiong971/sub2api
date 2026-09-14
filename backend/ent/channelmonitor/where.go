@@ -140,6 +140,11 @@ func BodyOverrideMode(v string) predicate.ChannelMonitor {
 	return predicate.ChannelMonitor(sql.FieldEQ(FieldBodyOverrideMode, v))
 }
 
+// ImageMode applies equality check predicate on the "image_mode" field. It's identical to ImageModeEQ.
+func ImageMode(v bool) predicate.ChannelMonitor {
+	return predicate.ChannelMonitor(sql.FieldEQ(FieldImageMode, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.ChannelMonitor {
 	return predicate.ChannelMonitor(sql.FieldEQ(FieldCreatedAt, v))
@@ -1038,6 +1043,16 @@ func BodyOverrideIsNil() predicate.ChannelMonitor {
 // BodyOverrideNotNil applies the NotNil predicate on the "body_override" field.
 func BodyOverrideNotNil() predicate.ChannelMonitor {
 	return predicate.ChannelMonitor(sql.FieldNotNull(FieldBodyOverride))
+}
+
+// ImageModeEQ applies the EQ predicate on the "image_mode" field.
+func ImageModeEQ(v bool) predicate.ChannelMonitor {
+	return predicate.ChannelMonitor(sql.FieldEQ(FieldImageMode, v))
+}
+
+// ImageModeNEQ applies the NEQ predicate on the "image_mode" field.
+func ImageModeNEQ(v bool) predicate.ChannelMonitor {
+	return predicate.ChannelMonitor(sql.FieldNEQ(FieldImageMode, v))
 }
 
 // HasHistory applies the HasEdge predicate on the "history" edge.

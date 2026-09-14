@@ -147,64 +147,87 @@ func (h *PlaygroundHandler) GetPlaygroundModelCandidates(c *gin.Context) {
 	response.Success(c, gin.H{"models": models})
 }
 
-// playgroundGlobalModelInput 全局模型库的单条输入。
-type playgroundGlobalModelInput struct {
-	ModelID     string `json:"model_id"`
-	DisplayName string `json:"display_name"`
-	PriceLabel  string `json:"price_label"`
-	UnitHint    string `json:"unit_hint"`
-	Description string `json:"description"`
-	ModelKind   string `json:"model_kind"`
-	Enabled     *bool  `json:"enabled"`
-	SortOrder   int    `json:"sort_order"`
-	MonitorID   *int64 `json:"monitor_id"`
+// playgroundGlobalBindingInput 全局渠道配置的单个绑定输入。
+type playgroundGlobalBindingInput struct {
+	GroupID int64                     `json:"group_id"`
+	Enabled bool                      `json:"enabled"`
+	Models  []playgroundAppModelInput `json:"models"`
 }
 
-// ListGlobalModels 全局模型库清单。
-// GET /api/v1/admin/playground/global-models
-func (h *PlaygroundHandler) ListGlobalModels(c *gin.Context) {
-	models, err := h.playgroundConfigService.ListGlobalModels(c.Request.Context())
+// ListGlobalConfig 全局渠道配置总览（渠道 + 模型清单）。
+// GET /api/v1/admin/playground/global-configs
+func (h *PlaygroundHandler) ListGlobalConfig(c *gin.Context) {
+	bindings, err := h.playgroundConfigService.ListGlobalConfig(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, gin.H{"models": models})
+	response.Success(c, gin.H{"bindings": bindings})
 }
 
-// UpdateGlobalModels 全量保存全局模型库。
-// PUT /api/v1/admin/playground/global-models
-func (h *PlaygroundHandler) UpdateGlobalModels(c *gin.Context) {
+// UpdateGlobalConfig 全量保存全局渠道配置（渠道绑定 + 各渠道模型清单）。
+// PUT /api/v1/admin/playground/global-configs
+func (h *PlaygroundHandler) UpdateGlobalConfig(c *gin.Context) {
 	var req struct {
-		Models []playgroundGlobalModelInput `json:"models"`
+		Bindings []playgroundGlobalBindingInput `json:"bindings"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request")
 		return
 	}
 
-	models := make([]service.PlaygroundGlobalModel, 0, len(req.Models))
-	for _, m := range req.Models {
-		enabled := true
-		if m.Enabled != nil {
-			enabled = *m.Enabled
+	bindings := make([]service.PlaygroundBindingInput, 0, len(req.Bindings))
+	for _, b := range req.Bindings {
+		models := make([]service.PlaygroundAppModel, 0, len(b.Models))
+		for _, m := range b.Models {
+			enabled := true
+			if m.Enabled != nil {
+				enabled = *m.Enabled
+			}
+			models = append(models, service.PlaygroundAppModel{
+				ModelID:     m.ModelID,
+				DisplayName: m.DisplayName,
+				PriceLabel:  m.PriceLabel,
+				UnitHint:    m.UnitHint,
+				Description: m.Description,
+				Enabled:     enabled,
+				SortOrder:   m.SortOrder,
+				ModelKind:   m.ModelKind,
+				MonitorID:   m.MonitorID,
+			})
 		}
-		models = append(models, service.PlaygroundGlobalModel{
-			ModelID:     m.ModelID,
-			DisplayName: m.DisplayName,
-			PriceLabel:  m.PriceLabel,
-			UnitHint:    m.UnitHint,
-			Description: m.Description,
-			ModelKind:   m.ModelKind,
-			Enabled:     enabled,
-			SortOrder:   m.SortOrder,
-			MonitorID:   m.MonitorID,
+		bindings = append(bindings, service.PlaygroundBindingInput{
+			GroupID: b.GroupID,
+			Enabled: b.Enabled,
+			Models:  models,
 		})
 	}
 
-	saved, err := h.playgroundConfigService.UpdateGlobalModels(c.Request.Context(), models)
+	if err := h.playgroundConfigService.SaveGlobalConfig(c.Request.Context(), bindings); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	saved, err := h.playgroundConfigService.ListGlobalConfig(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, gin.H{"models": saved})
+	response.Success(c, gin.H{"bindings": saved})
+}
+
+// GetGlobalModelCandidates 全局配置下某渠道的候选模型（复用分组候选，避免手填）。
+// GET /api/v1/admin/playground/global-configs/models/candidates?group_id=3
+func (h *PlaygroundHandler) GetGlobalModelCandidates(c *gin.Context) {
+	var groupID int64
+	if raw := c.Query("group_id"); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			groupID = parsed
+		}
+	}
+	models, err := h.playgroundConfigService.GetModelCandidates(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"models": models})
 }

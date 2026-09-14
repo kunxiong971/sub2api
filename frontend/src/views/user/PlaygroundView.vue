@@ -122,11 +122,24 @@ function buildInjectedGroup(
   }
 }
 
+// 默认激活分组的选择偏好：生图工作台优先激活含图片模型的分组。
+// 生图台可绑定多个分组（如纯文本组 + 图片组），历史行为固定取列表第一个；
+// 若第一个是纯文本组，用户打开生图台时模型选择器里没有任何图片模型，
+// 表现如同「无法生成图片」。这里按应用类型挑选更合理的默认激活分组，
+// profiles 全量清单不受影响，客户端仍可在工作台内切换。
+function pickPreferredActiveGroupIndex(groups: PlaygroundInjectedGroup[]): number {
+  if (appKey.value === 'image') {
+    const idx = groups.findIndex((g) => g.models.some((m) => (m.model_kind ?? '').toLowerCase() === 'image'))
+    if (idx >= 0) return idx
+  }
+  return 0
+}
+
 function buildInjectedConfig(): PlaygroundInjectedConfig | null {
   // 管理模式：多分组（多渠道）
   if (managedGroups.value.length > 0 && appConfig.value) {
     const groups = appConfig.value.groups.map((ag) => buildInjectedGroup(ag.group, ag.models))
-    const first = groups[0]
+    const first = groups[pickPreferredActiveGroupIndex(groups)]
     return {
       app: appKey.value,
       apiUrl: first.apiUrl,

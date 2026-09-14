@@ -19,8 +19,13 @@ import (
 func swapMonitorHTTPClient(t *testing.T) {
 	t.Helper()
 	orig := monitorHTTPClient
+	origImages := monitorImagesHTTPClient
 	monitorHTTPClient = &http.Client{Timeout: 5 * time.Second}
-	t.Cleanup(func() { monitorHTTPClient = orig })
+	monitorImagesHTTPClient = &http.Client{Timeout: 5 * time.Second}
+	t.Cleanup(func() {
+		monitorHTTPClient = orig
+		monitorImagesHTTPClient = origImages
+	})
 }
 
 // captureHandler 把每次收到的请求 body 和 headers 存起来，测试断言用。
@@ -87,6 +92,14 @@ func (h *openAICaptureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	answer := answerFromOpenAIRequest(parsed)
+	if h.lastPath == providerOpenAIImagesPath {
+		// Images API 响应格式：data[0] 带图片数据
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"created": time.Now().Unix(),
+			"data":    []map[string]any{{"url": "https://img.example/test.png"}},
+		})
+		return
+	}
 	if h.lastPath == providerOpenAIResponsesPath {
 		output := []map[string]any{}
 		if h.responsesLeadingReasoning {
@@ -208,7 +221,7 @@ func TestGrokMonitorConfiguration(t *testing.T) {
 	if err := validateAPIMode(MonitorProviderGrok, MonitorAPIModeResponses); err == nil {
 		t.Fatal("grok responses mode should be rejected by channel monitoring")
 	}
-	if err := validateReplaceRequestBody(MonitorProviderGrok, MonitorAPIModeChatCompletions, map[string]any{}); err == nil {
+	if err := validateReplaceRequestBody(MonitorProviderGrok, MonitorAPIModeChatCompletions, map[string]any{}, false); err == nil {
 		t.Fatal("grok replace-mode body should require messages")
 	}
 }
@@ -340,13 +353,14 @@ func TestRunCheckForModel_OpenAIResponsesReplaceMissingInstructionsFailsLocally(
 		BodyOverrideMode: MonitorBodyOverrideModeReplace,
 		BodyOverride: map[string]any{
 			"model": "gpt-test",
-			"input": "hello",
+			// 既无 instructions 也无 input → 本地校验失败，不应发出请求
 		},
 	})
 
 	if res.Status != MonitorStatusError {
 		t.Fatalf("invalid responses replace body should fail locally as error, got status=%s", res.Status)
 	}
+	// 默认（非 image_mode）校验口径：instructions 与 input 都必填。
 	if !strings.Contains(res.Message, "instructions and input are required") {
 		t.Errorf("expected local validation message about instructions/input, got %q", res.Message)
 	}
@@ -434,8 +448,9 @@ func TestRunCheckForModel_ReplaceMode_FullBodyUsedAndChallengeSkipped(t *testing
 	}
 }
 
-func TestRunCheckForModel_ReplaceMode_EmptyResponseIsFailed(t *testing.T) {
-	h := &captureHandler{respondText: ""} // 上游 200 但 content[0].text 为空
+func TestRunCheckForModel_ReplaceMode_EmptyTextDefaultStaysFailed(t *testing.T) {
+	// 默认（image_mode=false）维持原文本判定：2xx + 有 body 但抽不出文本 → failed。
+	h := &captureHandler{respondText: ""}
 	endpoint := setupFakeAnthropic(t, h)
 
 	opts := &CheckOptions{
@@ -445,10 +460,178 @@ func TestRunCheckForModel_ReplaceMode_EmptyResponseIsFailed(t *testing.T) {
 	res := runCheckForModel(context.Background(), MonitorProviderAnthropic, endpoint, "sk-fake", "claude-x", opts)
 
 	if res.Status != MonitorStatusFailed {
-		t.Errorf("replace mode with empty text should be failed, got status=%s", res.Status)
+		t.Errorf("default replace mode with empty text should stay failed, got status=%s message=%q", res.Status, res.Message)
 	}
 	if !strings.Contains(res.Message, "replace-mode") {
 		t.Errorf("failure message should hint replace-mode, got %q", res.Message)
+	}
+}
+
+func TestRunCheckForModel_ReplaceMode_ImageModeEmptyTextBodyOnlyOperational(t *testing.T) {
+	// image_mode=true：2xx + 原始响应体有字节即 operational（生图响应无文本）。
+	h := &captureHandler{respondText: ""}
+	endpoint := setupFakeAnthropic(t, h)
+
+	opts := &CheckOptions{
+		BodyOverrideMode: MonitorBodyOverrideModeReplace,
+		BodyOverride:     map[string]any{"model": "x", "messages": []any{}},
+		ImageMode:        true,
+	}
+	res := runCheckForModel(context.Background(), MonitorProviderAnthropic, endpoint, "sk-fake", "claude-x", opts)
+
+	if res.Status != MonitorStatusOperational {
+		t.Errorf("image mode replace with 2xx + non-empty body (empty text) should be operational, got status=%s message=%q",
+			res.Status, res.Message)
+	}
+}
+
+func TestRunCheckForModel_ReplaceMode_ZeroByteBodyIsFailed(t *testing.T) {
+	// 上游 200 但响应体 0 字节 → failed（上游没给任何内容）；image_mode 下同样 failed。
+	var handler http.HandlerFunc = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// 不写任何 body
+	}
+	swapMonitorHTTPClient(t)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	for _, imageMode := range []bool{false, true} {
+		opts := &CheckOptions{
+			BodyOverrideMode: MonitorBodyOverrideModeReplace,
+			BodyOverride:     map[string]any{"model": "x", "messages": []any{}},
+			ImageMode:        imageMode,
+		}
+		res := runCheckForModel(context.Background(), MonitorProviderAnthropic, srv.URL, "sk-fake", "claude-x", opts)
+
+		if res.Status != MonitorStatusFailed {
+			t.Errorf("replace mode (image_mode=%v) with 2xx + zero-byte body should be failed, got status=%s message=%q",
+				imageMode, res.Status, res.Message)
+		}
+		if !strings.Contains(res.Message, "replace-mode") {
+			t.Errorf("failure message should hint replace-mode (image_mode=%v), got %q", imageMode, res.Message)
+		}
+	}
+}
+
+func TestRunCheckForModel_ReplaceMode_ResponsesImageOnlyOperational(t *testing.T) {
+	// 核心场景：Responses API 生图探活。响应只有 image_generation_call、没有任何文本，
+	// 默认文本判定会误判 failed；image_mode=true 按「2xx + 响应体非空」判 operational，
+	// 使图片渠道（gpt-image 系）可以被真实监控连通性。
+	h := &openAICaptureHandler{
+		rawResponse: `{"id":"resp_1","output":[{"type":"image_generation_call","status":"completed","result":"<b64>"}]}`,
+	}
+	endpoint := setupFakeOpenAI(t, h)
+
+	// 纯生图 body：只有 input + tools，没有 instructions（image_mode 本地校验应放行）
+	res := runCheckForModel(context.Background(), MonitorProviderOpenAI, endpoint, "sk-openai", "gpt-image-x", &CheckOptions{
+		APIMode:          MonitorAPIModeResponses,
+		BodyOverrideMode: MonitorBodyOverrideModeReplace,
+		BodyOverride: map[string]any{
+			"model": "gpt-image-x",
+			"input": "a small red dot",
+			"tools": []any{map[string]any{"type": "image_generation"}},
+		},
+		ImageMode: true,
+	})
+
+	if res.Status != MonitorStatusOperational {
+		t.Errorf("image mode replace with image-only response should be operational, got status=%s message=%q", res.Status, res.Message)
+	}
+	if h.lastPath != providerOpenAIResponsesPath {
+		t.Errorf("expected responses path %q, got %q", providerOpenAIResponsesPath, h.lastPath)
+	}
+	if h.lastBody["model"] != "gpt-image-x" {
+		t.Errorf("replace mode should use user's model, got %v", h.lastBody["model"])
+	}
+}
+
+func TestRunCheckForModel_ReplaceMode_ResponsesImageOnlyBodyDefaultStillFails(t *testing.T) {
+	// 默认（image_mode=false）下，只有 input 的生图 body 在本地校验就应被拒
+	// （instructions and input are required），不发出请求。
+	h := &openAICaptureHandler{}
+	endpoint := setupFakeOpenAI(t, h)
+
+	res := runCheckForModel(context.Background(), MonitorProviderOpenAI, endpoint, "sk-openai", "gpt-image-x", &CheckOptions{
+		APIMode:          MonitorAPIModeResponses,
+		BodyOverrideMode: MonitorBodyOverrideModeReplace,
+		BodyOverride: map[string]any{
+			"model": "gpt-image-x",
+			"input": "a small red dot",
+		},
+	})
+
+	if res.Status != MonitorStatusError {
+		t.Fatalf("default mode image-only body should fail local validation, got status=%s", res.Status)
+	}
+	if !strings.Contains(res.Message, "instructions and input are required") {
+		t.Errorf("expected default validation message, got %q", res.Message)
+	}
+	if h.lastPath != "" {
+		t.Errorf("invalid replace body should fail before HTTP request, got path %q", h.lastPath)
+	}
+}
+
+func TestRunCheckForModel_ImagesMode_ChallengeSkippedDataPresentOperational(t *testing.T) {
+	// Images API 探活：POST /v1/images/generations，默认 body 带 model/prompt/n/size；
+	// 响应无 challenge 答案，data[0] 有图片数据即 operational（跳过 challenge 校验）。
+	h := &openAICaptureHandler{}
+	endpoint := setupFakeOpenAI(t, h)
+
+	res := runCheckForModel(context.Background(), MonitorProviderOpenAI, endpoint, "sk-openai", "gpt-image-2", &CheckOptions{
+		APIMode: MonitorAPIModeImages,
+	})
+
+	if res.Status != MonitorStatusOperational {
+		t.Fatalf("images mode should be operational when data[0] present, got status=%s message=%q", res.Status, res.Message)
+	}
+	if h.lastPath != providerOpenAIImagesPath {
+		t.Errorf("expected images path %q, got %q", providerOpenAIImagesPath, h.lastPath)
+	}
+	if h.lastBody["model"] != "gpt-image-2" {
+		t.Errorf("images mode should forward primary_model, got %v", h.lastBody["model"])
+	}
+	if h.lastBody["prompt"] != monitorImagesProbePrompt || h.lastBody["size"] != "1024x1024" {
+		t.Errorf("images mode default body should use fixed image prompt and size, got %v", h.lastBody)
+	}
+}
+
+func TestRunCheckForModel_ImagesMode_DataEmptyFailed(t *testing.T) {
+	// Images API 2xx 但 data[0] 无 url/b64_json → failed（上游 200 但没出图）。
+	h := &openAICaptureHandler{
+		rawResponse: `{"created":1,"data":[{"revised_prompt":"x"}],"usage":{"total_tokens":1}}`,
+	}
+	endpoint := setupFakeOpenAI(t, h)
+
+	res := runCheckForModel(context.Background(), MonitorProviderOpenAI, endpoint, "sk-openai", "gpt-image-2", &CheckOptions{
+		APIMode: MonitorAPIModeImages,
+	})
+
+	if res.Status != MonitorStatusFailed {
+		t.Fatalf("images mode with 2xx but no image data should be failed, got status=%s message=%q", res.Status, res.Message)
+	}
+	if !strings.Contains(res.Message, "images-mode") {
+		t.Errorf("failure message should hint images-mode, got %q", res.Message)
+	}
+}
+
+func TestRunCheckForModel_ImagesMode_UpstreamErrorSurfaced(t *testing.T) {
+	// 上游错误（如 forkc2p 对 /v1/responses 的 503）应如实进入 error 状态。
+	h := &openAICaptureHandler{
+		status:      http.StatusServiceUnavailable,
+		rawResponse: `{"error":{"message":"Service temporarily unavailable","type":"api_error"}}`,
+	}
+	endpoint := setupFakeOpenAI(t, h)
+
+	res := runCheckForModel(context.Background(), MonitorProviderOpenAI, endpoint, "sk-openai", "gpt-image-2", &CheckOptions{
+		APIMode: MonitorAPIModeImages,
+	})
+
+	if res.Status != MonitorStatusError {
+		t.Fatalf("images mode upstream 503 should be error, got status=%s", res.Status)
+	}
+	if !strings.Contains(res.Message, "503") {
+		t.Errorf("error message should include upstream status, got %q", res.Message)
 	}
 }
 

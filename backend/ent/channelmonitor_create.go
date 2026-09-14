@@ -239,6 +239,20 @@ func (_c *ChannelMonitorCreate) SetBodyOverride(v map[string]interface{}) *Chann
 	return _c
 }
 
+// SetImageMode sets the "image_mode" field.
+func (_c *ChannelMonitorCreate) SetImageMode(v bool) *ChannelMonitorCreate {
+	_c.mutation.SetImageMode(v)
+	return _c
+}
+
+// SetNillableImageMode sets the "image_mode" field if the given value is not nil.
+func (_c *ChannelMonitorCreate) SetNillableImageMode(v *bool) *ChannelMonitorCreate {
+	if v != nil {
+		_c.SetImageMode(*v)
+	}
+	return _c
+}
+
 // AddHistoryIDs adds the "history" edge to the ChannelMonitorHistory entity by IDs.
 func (_c *ChannelMonitorCreate) AddHistoryIDs(ids ...int64) *ChannelMonitorCreate {
 	_c.mutation.AddHistoryIDs(ids...)
@@ -363,6 +377,10 @@ func (_c *ChannelMonitorCreate) defaults() {
 		v := channelmonitor.DefaultBodyOverrideMode
 		_c.mutation.SetBodyOverrideMode(v)
 	}
+	if _, ok := _c.mutation.ImageMode(); !ok {
+		v := channelmonitor.DefaultImageMode
+		_c.mutation.SetImageMode(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -470,6 +488,9 @@ func (_c *ChannelMonitorCreate) check() error {
 			return &ValidationError{Name: "body_override_mode", err: fmt.Errorf(`ent: validator failed for field "ChannelMonitor.body_override_mode": %w`, err)}
 		}
 	}
+	if _, ok := _c.mutation.ImageMode(); !ok {
+		return &ValidationError{Name: "image_mode", err: errors.New(`ent: missing required field "ChannelMonitor.image_mode"`)}
+	}
 	return nil
 }
 
@@ -576,6 +597,10 @@ func (_c *ChannelMonitorCreate) createSpec() (*ChannelMonitor, *sqlgraph.CreateS
 	if value, ok := _c.mutation.BodyOverride(); ok {
 		_spec.SetField(channelmonitor.FieldBodyOverride, field.TypeJSON, value)
 		_node.BodyOverride = value
+	}
+	if value, ok := _c.mutation.ImageMode(); ok {
+		_spec.SetField(channelmonitor.FieldImageMode, field.TypeBool, value)
+		_node.ImageMode = value
 	}
 	if nodes := _c.mutation.HistoryIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -972,6 +997,18 @@ func (u *ChannelMonitorUpsert) ClearBodyOverride() *ChannelMonitorUpsert {
 	return u
 }
 
+// SetImageMode sets the "image_mode" field.
+func (u *ChannelMonitorUpsert) SetImageMode(v bool) *ChannelMonitorUpsert {
+	u.Set(channelmonitor.FieldImageMode, v)
+	return u
+}
+
+// UpdateImageMode sets the "image_mode" field to the value that was provided on create.
+func (u *ChannelMonitorUpsert) UpdateImageMode() *ChannelMonitorUpsert {
+	u.SetExcluded(channelmonitor.FieldImageMode)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -1357,6 +1394,20 @@ func (u *ChannelMonitorUpsertOne) UpdateBodyOverride() *ChannelMonitorUpsertOne 
 func (u *ChannelMonitorUpsertOne) ClearBodyOverride() *ChannelMonitorUpsertOne {
 	return u.Update(func(s *ChannelMonitorUpsert) {
 		s.ClearBodyOverride()
+	})
+}
+
+// SetImageMode sets the "image_mode" field.
+func (u *ChannelMonitorUpsertOne) SetImageMode(v bool) *ChannelMonitorUpsertOne {
+	return u.Update(func(s *ChannelMonitorUpsert) {
+		s.SetImageMode(v)
+	})
+}
+
+// UpdateImageMode sets the "image_mode" field to the value that was provided on create.
+func (u *ChannelMonitorUpsertOne) UpdateImageMode() *ChannelMonitorUpsertOne {
+	return u.Update(func(s *ChannelMonitorUpsert) {
+		s.UpdateImageMode()
 	})
 }
 
@@ -1911,6 +1962,20 @@ func (u *ChannelMonitorUpsertBulk) UpdateBodyOverride() *ChannelMonitorUpsertBul
 func (u *ChannelMonitorUpsertBulk) ClearBodyOverride() *ChannelMonitorUpsertBulk {
 	return u.Update(func(s *ChannelMonitorUpsert) {
 		s.ClearBodyOverride()
+	})
+}
+
+// SetImageMode sets the "image_mode" field.
+func (u *ChannelMonitorUpsertBulk) SetImageMode(v bool) *ChannelMonitorUpsertBulk {
+	return u.Update(func(s *ChannelMonitorUpsert) {
+		s.SetImageMode(v)
+	})
+}
+
+// UpdateImageMode sets the "image_mode" field to the value that was provided on create.
+func (u *ChannelMonitorUpsertBulk) UpdateImageMode() *ChannelMonitorUpsertBulk {
+	return u.Update(func(s *ChannelMonitorUpsert) {
+		s.UpdateImageMode()
 	})
 }
 

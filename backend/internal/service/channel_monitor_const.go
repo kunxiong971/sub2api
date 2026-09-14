@@ -9,8 +9,18 @@ import (
 // ChannelMonitor 全局常量。
 // 这些是 MVP 阶段的硬编码值，按需可以提到 config 中。
 const (
+	// monitorImagesProbePrompt 是 Images API 探活的固定生图 prompt。
+	// 注意不能用 challenge 算术题：上游图片模型会把算术题当聊天请求处理
+	// （回文字不出图，如 forkc2p 对纯算术题返回 upstream_text_reply 400）。
+	// images 判定只看 data[0] 是否有图片数据，不依赖 challenge 答案。
+	monitorImagesProbePrompt = "a small red dot on a white background"
+
 	// monitorRequestTimeout 单次模型请求总超时（含 Body 读取）。
 	monitorRequestTimeout = 45 * time.Second
+	// monitorImageRequestTimeout Images API 探活的单次请求超时。
+	// 生图天然慢（实测 gpt-image-2 约 45s、2.5-sunburst 约 63s），
+	// 沿用 45s 会把正常出图掐断成 error，故单独放宽。
+	monitorImageRequestTimeout = 180 * time.Second
 	// monitorPingTimeout HEAD 请求 endpoint origin 的超时。
 	monitorPingTimeout = 8 * time.Second
 	// monitorDegradedThreshold 主请求成功但耗时超过该阈值视为 degraded。
@@ -53,6 +63,8 @@ const (
 	providerZhipuPath = "/api/paas/v4/chat/completions"
 	// providerOpenAIResponsesPath OpenAI Responses API 路径。
 	providerOpenAIResponsesPath = "/v1/responses"
+	// providerOpenAIImagesPath OpenAI Images API 路径（图片模型探活）。
+	providerOpenAIImagesPath = "/v1/images/generations"
 	// providerAnthropicPath Anthropic Messages 路径。
 	providerAnthropicPath = "/v1/messages"
 	// providerGeminiPathTemplate Gemini generateContent 路径模板（含 model 占位）。
@@ -167,10 +179,10 @@ var (
 		"CHANNEL_MONITOR_ACCOUNT_NOT_SUPPORTABLE", "linked account cannot serve as a quota data source (cn coding plan must be kimi/zhipu/minimax, cn payg must be kimi/deepseek, openai requires an oauth account, anthropic requires oauth or setup-token)",
 	)
 	ErrChannelMonitorInvalidAPIMode = infraerrors.BadRequest(
-		"CHANNEL_MONITOR_INVALID_API_MODE", "api_mode must be chat_completions or responses; responses is only supported for openai",
+		"CHANNEL_MONITOR_INVALID_API_MODE", "api_mode must be chat_completions, responses or images; responses/images are only supported for openai",
 	)
 	ErrChannelMonitorInvalidRequestBody = infraerrors.BadRequest(
-		"CHANNEL_MONITOR_INVALID_REQUEST_BODY", "openai-compatible replace-mode body_override must include non-empty messages for chat_completions or non-empty instructions and input for responses",
+		"CHANNEL_MONITOR_INVALID_REQUEST_BODY", "openai-compatible replace-mode body_override must include non-empty messages for chat_completions or non-empty instructions/input for responses",
 	)
 	ErrChannelMonitorInvalidInterval = infraerrors.BadRequest(
 		"CHANNEL_MONITOR_INVALID_INTERVAL", "interval_seconds must be in [15, 3600]",

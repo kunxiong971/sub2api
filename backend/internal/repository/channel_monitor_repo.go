@@ -54,7 +54,8 @@ func (r *channelMonitorRepository) Create(ctx context.Context, m *service.Channe
 		SetCreatedBy(m.CreatedBy).
 		SetExtraHeaders(channelMonitorHeadersForPersistence(m)).
 		SetBodyOverrideMode(defaultBodyModeRepo(m.BodyOverrideMode)).
-		SetCheckMode(defaultCheckModeRepo(m.CheckMode))
+		SetCheckMode(defaultCheckModeRepo(m.CheckMode)).
+		SetImageMode(m.ImageMode)
 	if m.TemplateID != nil {
 		builder = builder.SetTemplateID(*m.TemplateID)
 	}
@@ -125,7 +126,8 @@ func (r *channelMonitorRepository) Update(ctx context.Context, m *service.Channe
 		SetJitterSeconds(m.JitterSeconds).
 		SetExtraHeaders(channelMonitorHeadersForPersistence(m)).
 		SetBodyOverrideMode(defaultBodyModeRepo(m.BodyOverrideMode)).
-		SetCheckMode(defaultCheckModeRepo(m.CheckMode))
+		SetCheckMode(defaultCheckModeRepo(m.CheckMode)).
+		SetImageMode(m.ImageMode)
 	if m.TemplateID != nil {
 		updater = updater.SetTemplateID(*m.TemplateID)
 	} else {
@@ -790,6 +792,7 @@ func entToServiceMonitor(row *dbent.ChannelMonitor) *service.ChannelMonitor {
 		BodyOverrideMode:     row.BodyOverrideMode,
 		BodyOverride:         row.BodyOverride,
 		CheckMode:            defaultCheckModeRepo(row.CheckMode),
+		ImageMode:            row.ImageMode,
 		DuplicateOperationID: duplicateOperationID,
 	}
 	if row.TemplateID != nil {

@@ -21,19 +21,30 @@ import (
 // 自定义 Transport 在 dial 时强制再次校验 IP，防止 DNS rebinding 绕过 validateEndpoint。
 var monitorHTTPClient = newSSRFSafeHTTPClient(monitorRequestTimeout)
 
+// monitorImagesHTTPClient Images API 探活专用（生图耗时远超文本，总超时与
+// 等待响应头超时都放宽；上游可能 60s+ 才回第一个字节）。
+var monitorImagesHTTPClient = newSSRFSafeHTTPClientWithHeaderTimeout(monitorImageRequestTimeout, monitorImageRequestTimeout)
+
 // monitorPingHTTPClient 用于 endpoint origin 的 HEAD ping，超时更短。
 var monitorPingHTTPClient = newSSRFSafeHTTPClient(monitorPingTimeout)
 
 // newSSRFSafeHTTPClient 返回一个使用 safeDialContext 的 http.Client。
 // 仅供监控模块对外发起请求使用——所有目标都应是公网 endpoint。
 func newSSRFSafeHTTPClient(timeout time.Duration) *http.Client {
+	return newSSRFSafeHTTPClientWithHeaderTimeout(timeout, monitorResponseHeaderTimeout)
+}
+
+// newSSRFSafeHTTPClientWithHeaderTimeout 同 newSSRFSafeHTTPClient，
+// 但可覆盖「等待响应头」超时。Images 探活的生图上游可能 60s+ 才开始回包，
+// 沿用默认 30s 会把正常出图掐断成 "http2: timeout awaiting response headers"。
+func newSSRFSafeHTTPClientWithHeaderTimeout(timeout, headerTimeout time.Duration) *http.Client {
 	tr := &http.Transport{
 		DialContext:           safeDialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          16,
 		IdleConnTimeout:       monitorIdleConnTimeout,
 		TLSHandshakeTimeout:   monitorTLSHandshakeTimeout,
-		ResponseHeaderTimeout: monitorResponseHeaderTimeout,
+		ResponseHeaderTimeout: headerTimeout,
 	}
 	return &http.Client{Timeout: timeout, Transport: servertiming.WrapRoundTripper(tr)}
 }
@@ -50,6 +61,9 @@ type CheckOptions struct {
 	// BodyOverride 在 merge 模式下做浅合并（key 命中黑名单时静默丢弃），
 	// 在 replace 模式下直接当作完整 body。
 	BodyOverride map[string]any
+	// ImageMode 图片模型探活：replace 模式下按「2xx + 响应体非空」判定，
+	// 覆盖默认的文本判定（生图响应只有 image_generation_call，无文本）。
+	ImageMode bool
 }
 
 // runCheckForModel 对单个 (provider, model) 做一次完整检测。
@@ -66,8 +80,16 @@ func runCheckForModel(ctx context.Context, provider, endpoint, apiKey, model str
 	challenge := generateChallenge()
 	mode := bodyOverrideMode(opts)
 
+	// Images 探活的 prompt 必须是生图语义：算术题会被上游图片模型当聊天
+	// 处理（回文字不出图 → forkc2p 报 upstream_text_reply 400）。
+	// 探测判定只看响应是否携带图片数据，与 challenge 答案无关。
+	prompt := challenge.Prompt
+	if checkAPIMode(opts) == MonitorAPIModeImages {
+		prompt = monitorImagesProbePrompt
+	}
+
 	start := time.Now()
-	respText, rawBody, statusCode, err := callProvider(ctx, provider, endpoint, apiKey, model, challenge.Prompt, opts)
+	respText, rawBody, statusCode, err := callProvider(ctx, provider, endpoint, apiKey, model, prompt, opts)
 	latency := time.Since(start)
 	latencyMs := int(latency / time.Millisecond)
 	res.LatencyMs = &latencyMs
@@ -87,15 +109,41 @@ func runCheckForModel(ctx context.Context, provider, endpoint, apiKey, model str
 	}
 
 	// Replace 模式：跳过 challenge 校验（用户 body 是静态的，challenge 没法嵌入）。
-	// 改用「HTTP 2xx + 响应文本（adapter.textPath 抽取）非空」作为 operational 判定。
-	// 响应文本为空则降级为 failed（视为上游回了 200 但没实际内容）。
+	//   image_mode=false（默认）：维持原文本判定 —— 2xx + textPath 文本非空才可用。
+	//   image_mode=true（图片模型监控）：2xx + 原始响应体非空即算可用 —— 生图响应
+	//   只有 image_generation_call 没有文本，按文本判定会永久误判 failed。
+	// 两种模式下响应体 0 字节都判 failed（上游 200 但无任何内容）。
 	if mode == MonitorBodyOverrideModeReplace {
-		if strings.TrimSpace(respText) == "" {
+		imageMode := opts != nil && opts.ImageMode
+		if strings.TrimSpace(respText) == "" && (!imageMode || len(rawBody) == 0) {
 			res.Status = MonitorStatusFailed
-			res.Message = truncateMessage("replace-mode: upstream returned 2xx with empty text")
+			message := "replace-mode: upstream returned 2xx with empty text"
+			if len(rawBody) == 0 {
+				message = "replace-mode: upstream returned 2xx with empty body"
+			}
+			res.Message = truncateMessage(message)
 			return res
 		}
 		return finalizeOperationalOrDegraded(res, latency, latencyMs)
+	}
+
+	// Images API 探活：响应没有 challenge 答案（只有图片数据），跳过 challenge 校验，
+	// 以「2xx + data[0] 图片数据非空」（extractText 已封装）作为可用判定。
+	// 生图天然慢（实测 45~65s），请求超时放宽到 monitorImageRequestTimeout，
+	// 出图即 operational；超过超时上限先由 client 掐断走 error 路径。
+	if checkAPIMode(opts) == MonitorAPIModeImages {
+		if strings.TrimSpace(respText) == "" {
+			res.Status = MonitorStatusFailed
+			res.Message = truncateMessage("images-mode: upstream returned 2xx without image data")
+			return res
+		}
+		if latency >= monitorImageRequestTimeout {
+			res.Status = MonitorStatusDegraded
+			res.Message = truncateMessage(fmt.Sprintf("slow image generation: %dms", latencyMs))
+			return res
+		}
+		res.Status = MonitorStatusOperational
+		return res
 	}
 
 	if !validateChallenge(respText, challenge.Expected) {
@@ -266,10 +314,49 @@ var providerOpenAIResponsesAdapter = providerAdapter{
 	textPath: "output.0.content.0.text",
 }
 
+// providerOpenAIImagesAdapter Images API 探活（gpt-image 系纯生图上游）。
+// 响应没有 challenge 答案，extractText 以 data[0] 图片数据（url/b64_json）非空为「出了图」。
+var providerOpenAIImagesAdapter = providerAdapter{
+	buildPath: func(string) string { return providerOpenAIImagesPath },
+	buildBody: func(model, prompt string) ([]byte, error) {
+		return json.Marshal(map[string]any{
+			"model": model,
+			"prompt": prompt,
+			"n":     1,
+			// 官方支持的最低分辨率，单图成本最低；仅作连通性探测。
+			"size": "1024x1024",
+		})
+	},
+	buildHeaders: func(apiKey string) map[string]string {
+		return map[string]string{"Authorization": "Bearer " + apiKey}
+	},
+	extractText: extractOpenAIImagesMonitorText,
+}
+
+// extractOpenAIImagesMonitorText 判定 Images 响应是否真的出了图：
+// data[0].url 或 data[0].b64_json 任一非空即返回非空标记文本，否则空串。
+func extractOpenAIImagesMonitorText(respBytes []byte) string {
+	item := gjson.GetBytes(respBytes, "data.0")
+	if !item.Exists() {
+		return ""
+	}
+	if strings.TrimSpace(item.Get("url").String()) != "" || strings.TrimSpace(item.Get("b64_json").String()) != "" {
+		return "image"
+	}
+	return ""
+}
+
 // providerAdapterFor 按 provider + api_mode 选择具体 adapter。
 func providerAdapterFor(provider, apiMode string) (providerAdapter, string, bool) {
-	if provider == MonitorProviderOpenAI && defaultAPIMode(apiMode) == MonitorAPIModeResponses {
-		return providerOpenAIResponsesAdapter, MonitorAPIModeResponses, true
+	switch defaultAPIMode(apiMode) {
+	case MonitorAPIModeResponses:
+		if provider == MonitorProviderOpenAI {
+			return providerOpenAIResponsesAdapter, MonitorAPIModeResponses, true
+		}
+	case MonitorAPIModeImages:
+		if provider == MonitorProviderOpenAI {
+			return providerOpenAIImagesAdapter, MonitorAPIModeImages, true
+		}
 	}
 	adapter, ok := providerAdapters[provider]
 	return adapter, MonitorAPIModeChatCompletions, ok
@@ -298,7 +385,12 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 	}
 	headers := mergeHeaders(adapter.buildHeaders(apiKey), opts)
 	full := joinURL(endpoint, adapter.buildPath(model))
-	respBytes, status, err := postRawJSON(ctx, full, body, headers)
+	// Images 探活走独立 client（生图慢，超时放宽到 monitorImageRequestTimeout）。
+	client := monitorHTTPClient
+	if provider == MonitorProviderOpenAI && apiMode == MonitorAPIModeImages {
+		client = monitorImagesHTTPClient
+	}
+	respBytes, status, err := postRawJSON(ctx, full, body, headers, client)
 	if err != nil {
 		return "", "", status, err
 	}
@@ -411,7 +503,7 @@ func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt 
 		if opts == nil || len(opts.BodyOverride) == 0 {
 			return nil, fmt.Errorf("replace mode: body_override is empty")
 		}
-		if err := validateReplaceRequestBody(provider, apiMode, opts.BodyOverride); err != nil {
+		if err := validateReplaceRequestBody(provider, apiMode, opts.BodyOverride, opts.ImageMode); err != nil {
 			return nil, err
 		}
 		body, err := json.Marshal(opts.BodyOverride)
@@ -455,6 +547,7 @@ func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt 
 var bodyMergeKeyDenyList = map[string]map[string]bool{
 	MonitorProviderOpenAI + ":" + MonitorAPIModeChatCompletions: {"model": true, "messages": true, "stream": true},
 	MonitorProviderOpenAI + ":" + MonitorAPIModeResponses:       {"model": true, "instructions": true, "input": true, "stream": true},
+	MonitorProviderOpenAI + ":" + MonitorAPIModeImages:          {"model": true, "prompt": true, "n": true, "size": true},
 	MonitorProviderGrok:      {"model": true, "messages": true, "stream": true},
 	MonitorProviderAnthropic: {"model": true, "messages": true},
 	MonitorProviderGemini:    {"contents": true},
@@ -491,14 +584,29 @@ func isOpenAICompatibleChatProvider(provider string) bool {
 	}
 }
 
-func validateReplaceRequestBody(provider, apiMode string, body map[string]any) error {
+func validateReplaceRequestBody(provider, apiMode string, body map[string]any, imageMode bool) error {
 	if !isOpenAICompatibleChatProvider(provider) {
 		return nil
 	}
 	switch defaultAPIMode(apiMode) {
 	case MonitorAPIModeResponses:
-		if strings.TrimSpace(stringFromAny(body["instructions"])) == "" || !hasNonEmptyBodyValue(body["input"]) {
+		hasInstructions := strings.TrimSpace(stringFromAny(body["instructions"])) != ""
+		hasInput := hasNonEmptyBodyValue(body["input"])
+		if imageMode {
+			// 图片模型探活：生图请求通常只有 input + tools，无 instructions。
+			if !hasInstructions && !hasInput {
+				return fmt.Errorf("replace mode responses body: instructions or input is required")
+			}
+			return nil
+		}
+		// 文本探活（默认）：维持原校验，instructions 与 input 都要非空。
+		if !hasInstructions || !hasInput {
 			return fmt.Errorf("replace mode responses body: instructions and input are required")
+		}
+	case MonitorAPIModeImages:
+		// Images API 覆盖模式：prompt 必填（model 可覆盖为探活模型）。
+		if !hasNonEmptyBodyValue(body["prompt"]) {
+			return fmt.Errorf("replace mode images body: prompt is required")
 		}
 	case MonitorAPIModeChatCompletions:
 		if !hasNonEmptyBodyValue(body["messages"]) {
@@ -532,7 +640,8 @@ func hasNonEmptyBodyValue(v any) bool {
 
 // postRawJSON 发送 POST + 已序列化好的 JSON 字节，限制响应体大小，返回响应字节、HTTP status、错误。
 // adapter 自行 marshal 是为了精确控制字段顺序与类型，所以这里直接收 []byte 而不是 any。
-func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers map[string]string) ([]byte, int, error) {
+// client 由调用方传入（文本 / images 探活超时不同）。
+func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers map[string]string, client *http.Client) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, 0, fmt.Errorf("build request: %w", err)
@@ -543,7 +652,7 @@ func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers ma
 		req.Header.Set(k, v)
 	}
 
-	resp, err := monitorHTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("do request: %w", err)
 	}

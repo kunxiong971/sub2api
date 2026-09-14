@@ -107,6 +107,13 @@ func (ChannelMonitor) Fields() []ent.Field {
 		// body_override: 同 ChannelMonitorRequestTemplate.body_override
 		field.JSON("body_override", map[string]any{}).
 			Optional(),
+		// image_mode: 图片模型探活开关。
+		//   false（默认）- 维持原有文本判定：2xx + textPath 抽出文本非空才算可用
+		//   true        - 2xx + 原始响应体非空即算可用（生图响应只有
+		//                 image_generation_call 无文本，按文本判定会永久误判 failed）
+		field.Bool("image_mode").
+			Default(false).
+			Comment("true = judge by non-empty response body (image generation); false = text-path based (default)"),
 	}
 }
 

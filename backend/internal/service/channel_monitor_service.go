@@ -149,7 +149,7 @@ func (s *ChannelMonitorService) Create(ctx context.Context, p ChannelMonitorCrea
 	if err := validateCreateParams(p); err != nil {
 		return nil, err
 	}
-	if err := validateBodyModeForProtocol(p.Provider, p.APIMode, p.BodyOverrideMode, p.BodyOverride); err != nil {
+	if err := validateBodyModeForProtocol(p.Provider, p.APIMode, p.BodyOverrideMode, p.BodyOverride, p.ImageMode); err != nil {
 		return nil, err
 	}
 	if err := validateExtraHeaders(p.ExtraHeaders); err != nil {
@@ -182,6 +182,7 @@ func (s *ChannelMonitorService) Create(ctx context.Context, p ChannelMonitorCrea
 		BodyOverride:     p.BodyOverride,
 		CheckMode:        checkMode,
 		AccountID:        cloneInt64Pointer(p.AccountID),
+		ImageMode:        p.ImageMode,
 	}
 	if err := s.repo.Create(ctx, m); err != nil {
 		return nil, fmt.Errorf("create channel monitor: %w", err)
@@ -708,6 +709,7 @@ func (s *ChannelMonitorService) runChecksConcurrent(ctx context.Context, m *Chan
 		ExtraHeaders:     m.ExtraHeaders,
 		BodyOverrideMode: m.BodyOverrideMode,
 		BodyOverride:     m.BodyOverride,
+		ImageMode:        m.ImageMode,
 	}
 
 	var eg errgroup.Group
@@ -987,6 +989,10 @@ func applyMonitorAdvancedUpdate(existing *ChannelMonitor, p ChannelMonitorUpdate
 	if err := validateAPIMode(existing.Provider, newAPIMode); err != nil {
 		return err
 	}
+	// image_mode 先应用：联合校验（replace body 结构）需要按更新后的口径判定。
+	if p.ImageMode != nil {
+		existing.ImageMode = *p.ImageMode
+	}
 	// BodyOverrideMode / BodyOverride 联合校验，和模板一致。
 	newMode := existing.BodyOverrideMode
 	newBody := existing.BodyOverride
@@ -997,7 +1003,7 @@ func applyMonitorAdvancedUpdate(existing *ChannelMonitor, p ChannelMonitorUpdate
 		newBody = *p.BodyOverride
 	}
 	if providerChanged || p.APIMode != nil || p.BodyOverrideMode != nil || p.BodyOverride != nil {
-		if err := validateBodyModeForProtocol(existing.Provider, newAPIMode, newMode, newBody); err != nil {
+		if err := validateBodyModeForProtocol(existing.Provider, newAPIMode, newMode, newBody, existing.ImageMode); err != nil {
 			return err
 		}
 		existing.BodyOverrideMode = defaultBodyMode(newMode)

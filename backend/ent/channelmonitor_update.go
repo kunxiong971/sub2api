@@ -344,6 +344,20 @@ func (_u *ChannelMonitorUpdate) ClearBodyOverride() *ChannelMonitorUpdate {
 	return _u
 }
 
+// SetImageMode sets the "image_mode" field.
+func (_u *ChannelMonitorUpdate) SetImageMode(v bool) *ChannelMonitorUpdate {
+	_u.mutation.SetImageMode(v)
+	return _u
+}
+
+// SetNillableImageMode sets the "image_mode" field if the given value is not nil.
+func (_u *ChannelMonitorUpdate) SetNillableImageMode(v *bool) *ChannelMonitorUpdate {
+	if v != nil {
+		_u.SetImageMode(*v)
+	}
+	return _u
+}
+
 // AddHistoryIDs adds the "history" edge to the ChannelMonitorHistory entity by IDs.
 func (_u *ChannelMonitorUpdate) AddHistoryIDs(ids ...int64) *ChannelMonitorUpdate {
 	_u.mutation.AddHistoryIDs(ids...)
@@ -639,6 +653,9 @@ func (_u *ChannelMonitorUpdate) sqlSave(ctx context.Context) (_node int, err err
 	}
 	if _u.mutation.BodyOverrideCleared() {
 		_spec.ClearField(channelmonitor.FieldBodyOverride, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.ImageMode(); ok {
+		_spec.SetField(channelmonitor.FieldImageMode, field.TypeBool, value)
 	}
 	if _u.mutation.HistoryCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1091,6 +1108,20 @@ func (_u *ChannelMonitorUpdateOne) ClearBodyOverride() *ChannelMonitorUpdateOne 
 	return _u
 }
 
+// SetImageMode sets the "image_mode" field.
+func (_u *ChannelMonitorUpdateOne) SetImageMode(v bool) *ChannelMonitorUpdateOne {
+	_u.mutation.SetImageMode(v)
+	return _u
+}
+
+// SetNillableImageMode sets the "image_mode" field if the given value is not nil.
+func (_u *ChannelMonitorUpdateOne) SetNillableImageMode(v *bool) *ChannelMonitorUpdateOne {
+	if v != nil {
+		_u.SetImageMode(*v)
+	}
+	return _u
+}
+
 // AddHistoryIDs adds the "history" edge to the ChannelMonitorHistory entity by IDs.
 func (_u *ChannelMonitorUpdateOne) AddHistoryIDs(ids ...int64) *ChannelMonitorUpdateOne {
 	_u.mutation.AddHistoryIDs(ids...)
@@ -1416,6 +1447,9 @@ func (_u *ChannelMonitorUpdateOne) sqlSave(ctx context.Context) (_node *ChannelM
 	}
 	if _u.mutation.BodyOverrideCleared() {
 		_spec.ClearField(channelmonitor.FieldBodyOverride, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.ImageMode(); ok {
+		_spec.SetField(channelmonitor.FieldImageMode, field.TypeBool, value)
 	}
 	if _u.mutation.HistoryCleared() {
 		edge := &sqlgraph.EdgeSpec{

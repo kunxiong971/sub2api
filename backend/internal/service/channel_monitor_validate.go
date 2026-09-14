@@ -91,7 +91,7 @@ func validateAPIMode(provider, apiMode string) error {
 	switch apiMode {
 	case MonitorAPIModeChatCompletions:
 		return nil
-	case MonitorAPIModeResponses:
+	case MonitorAPIModeResponses, MonitorAPIModeImages:
 		if provider == "" || provider == MonitorProviderOpenAI {
 			return nil
 		}

@@ -60,32 +60,13 @@ export interface PlaygroundBindingInput {
   models: PlaygroundAppModelInput[]
 }
 
-/** 全局模型库条目：模型展示信息只维护一份，各工作台按类型自动注入 */
-export interface PlaygroundGlobalModelConfig {
-  id: number
-  model_id: string
-  display_name: string
-  price_label: string
-  unit_hint: string
-  description: string
-  model_kind: string
+/** 全局渠道配置：一个渠道（分组）绑定 + 该渠道下的模型清单，三个工作台按类型自动分流注入 */
+export interface PlaygroundGlobalBindingView {
+  group_id: number
+  group_name: string
+  group_platform: string
   enabled: boolean
-  sort_order: number
-  monitor_id: number | null
-  created_at: string
-  updated_at: string
-}
-
-export interface PlaygroundGlobalModelInput {
-  model_id: string
-  display_name?: string
-  price_label?: string
-  unit_hint?: string
-  description?: string
-  model_kind?: string
-  enabled?: boolean
-  sort_order?: number
-  monitor_id?: number | null
+  models: PlaygroundAppModelConfig[]
 }
 
 /** 拉取三个应用的配置总览（每个应用含绑定的多个分组） */
@@ -123,21 +104,30 @@ export async function fetchModelCandidates(
   return data?.models ?? []
 }
 
-/** 全局模型库清单 */
-export async function listGlobalModels(): Promise<PlaygroundGlobalModelConfig[]> {
-  const { data } = await apiClient.get<{ models: PlaygroundGlobalModelConfig[] }>(
-    '/admin/playground/global-models'
+/** 全局渠道配置总览（渠道 + 模型清单） */
+export async function listGlobalConfig(): Promise<PlaygroundGlobalBindingView[]> {
+  const { data } = await apiClient.get<{ bindings: PlaygroundGlobalBindingView[] }>(
+    '/admin/playground/global-configs'
   )
-  return data?.models ?? []
+  return data?.bindings ?? []
 }
 
-/** 全量保存全局模型库 */
-export async function updateGlobalModels(
-  models: PlaygroundGlobalModelInput[]
-): Promise<PlaygroundGlobalModelConfig[]> {
-  const { data } = await apiClient.put<{ models: PlaygroundGlobalModelConfig[] }>(
-    '/admin/playground/global-models',
-    { models }
+/** 全量保存全局渠道配置（渠道绑定 + 各渠道模型清单） */
+export async function updateGlobalConfig(
+  bindings: PlaygroundBindingInput[]
+): Promise<PlaygroundGlobalBindingView[]> {
+  const { data } = await apiClient.put<{ bindings: PlaygroundGlobalBindingView[] }>(
+    '/admin/playground/global-configs',
+    { bindings }
+  )
+  return data?.bindings ?? []
+}
+
+/** 拉取全局配置下某渠道的候选模型（避免手填） */
+export async function fetchGlobalModelCandidates(groupId: number): Promise<string[]> {
+  const { data } = await apiClient.get<{ models: string[] }>(
+    '/admin/playground/global-configs/models/candidates',
+    { params: { group_id: groupId } }
   )
   return data?.models ?? []
 }
@@ -146,8 +136,9 @@ export const playgroundAdminAPI = {
   listConfigs,
   updateConfig,
   fetchModelCandidates,
-  listGlobalModels,
-  updateGlobalModels
+  listGlobalConfig,
+  updateGlobalConfig,
+  fetchGlobalModelCandidates
 }
 
 export default playgroundAdminAPI

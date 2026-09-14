@@ -41,7 +41,7 @@ func NewChannelMonitorHandler(monitorService *service.ChannelMonitorService) *Ch
 type channelMonitorCreateRequest struct {
 	Name             string            `json:"name" binding:"required,max=100"`
 	Provider         string            `json:"provider" binding:"required,oneof=openai anthropic gemini grok antigravity kimi zhipu deepseek minimax"`
-	APIMode          string            `json:"api_mode" binding:"omitempty,oneof=chat_completions responses"`
+	APIMode          string            `json:"api_mode" binding:"omitempty,oneof=chat_completions responses images"`
 	Endpoint         string            `json:"endpoint" binding:"omitempty,max=500"`
 	APIKey           string            `json:"api_key" binding:"omitempty,max=2000"`
 	PrimaryModel     string            `json:"primary_model" binding:"max=200"`
@@ -54,6 +54,8 @@ type channelMonitorCreateRequest struct {
 	ExtraHeaders     map[string]string `json:"extra_headers"`
 	BodyOverrideMode string            `json:"body_override_mode" binding:"omitempty,oneof=off merge replace"`
 	BodyOverride     map[string]any    `json:"body_override"`
+	// ImageMode 图片模型探活：replace 模式下按「2xx + 响应体非空」判定（见 checker）。
+	ImageMode bool `json:"image_mode"`
 
 	// CheckMode: probe（默认）/ quota / quota_probe。quota 模式 endpoint/api_key
 	// 可空（条件必填校验在 service 层按模式分支）。
@@ -65,7 +67,7 @@ type channelMonitorCreateRequest struct {
 type channelMonitorUpdateRequest struct {
 	Name             *string            `json:"name" binding:"omitempty,max=100"`
 	Provider         *string            `json:"provider" binding:"omitempty,oneof=openai anthropic gemini grok antigravity kimi zhipu deepseek minimax"`
-	APIMode          *string            `json:"api_mode" binding:"omitempty,oneof=chat_completions responses"`
+	APIMode          *string            `json:"api_mode" binding:"omitempty,oneof=chat_completions responses images"`
 	Endpoint         *string            `json:"endpoint" binding:"omitempty,max=500"`
 	APIKey           *string            `json:"api_key" binding:"omitempty,max=2000"`
 	PrimaryModel     *string            `json:"primary_model" binding:"omitempty,max=200"`
@@ -79,6 +81,7 @@ type channelMonitorUpdateRequest struct {
 	ExtraHeaders     *map[string]string `json:"extra_headers"`
 	BodyOverrideMode *string            `json:"body_override_mode" binding:"omitempty,oneof=off merge replace"`
 	BodyOverride     *map[string]any    `json:"body_override"`
+	ImageMode        *bool              `json:"image_mode"` // nil = 不更新
 
 	// CheckMode/AccountID：nil = 不更新；AccountID 指向 0 = 清空关联。
 	CheckMode *string `json:"check_mode" binding:"omitempty,oneof=probe quota quota_probe"`
@@ -112,6 +115,7 @@ type channelMonitorResponse struct {
 	ExtraHeaders     map[string]string `json:"extra_headers"`
 	BodyOverrideMode string            `json:"body_override_mode"`
 	BodyOverride     map[string]any    `json:"body_override"`
+	ImageMode        bool              `json:"image_mode"`
 
 	// 配额模式：check_mode + 关联账号 + 主模型最近配额快照
 	// （LatestQuota 由 List handler 批量聚合后填充；管理端不受 channel_monitor_show_quota 影响）。
@@ -182,6 +186,7 @@ func channelMonitorToResponse(m *service.ChannelMonitor) *channelMonitorResponse
 		ExtraHeaders:        headers,
 		BodyOverrideMode:    m.BodyOverrideMode,
 		BodyOverride:        m.BodyOverride,
+		ImageMode:           m.ImageMode,
 		CheckMode:           m.CheckMode,
 		AccountID:           m.AccountID,
 		// PrimaryStatus / PrimaryLatencyMs / Availability7d / LatestQuota
@@ -352,6 +357,7 @@ func (h *ChannelMonitorHandler) Create(c *gin.Context) {
 		ExtraHeaders:     req.ExtraHeaders,
 		BodyOverrideMode: req.BodyOverrideMode,
 		BodyOverride:     req.BodyOverride,
+		ImageMode:        req.ImageMode,
 		CheckMode:        req.CheckMode,
 		AccountID:        req.AccountID,
 	})
@@ -448,6 +454,7 @@ func (h *ChannelMonitorHandler) Update(c *gin.Context) {
 		ExtraHeaders:     req.ExtraHeaders,
 		BodyOverrideMode: req.BodyOverrideMode,
 		BodyOverride:     req.BodyOverride,
+		ImageMode:        req.ImageMode,
 		CheckMode:        req.CheckMode,
 		AccountID:        req.AccountID,
 	})

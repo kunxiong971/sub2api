@@ -7,14 +7,12 @@ export default {
       chat: 'Chat',
       image: 'Image',
       canvas: 'Canvas',
-      global: 'Global models'
+      global: 'Global config'
     },
     globalHint:
-      'Maintain one model list here — after marking the kind, models are injected automatically: Chat gets "Chat (LLM)"; Image and Canvas get "Chat (LLM) + Image". App tabs only need group bindings.',
-    globalTitle: 'Global models ({count})',
-    globalAdd: 'Add model',
-    globalRemove: 'Remove',
-    globalEmpty: 'No global models yet — click "Add model" to start',
+      'Maintain channels + model lists once here: add a channel, fetch its models, set display name / price / kind. Chat injects "Chat (LLM)" models; Image and Canvas inject "Chat (LLM) + Image". App tabs remain only as per-app overrides.',
+    globalTag: 'Global',
+    globalRowHint: 'Effective model from the global config — edit it on the Global config tab',
     basic: 'Basic',
     addGroup: 'Add group',
     removeGroup: 'Remove',

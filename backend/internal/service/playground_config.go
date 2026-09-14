@@ -119,26 +119,32 @@ type PlaygroundConfigRepository interface {
 	ListModelsByAppConfig(ctx context.Context, appConfigID int64) ([]PlaygroundAppModel, error)
 	// ReplaceApp 全量替换某应用的所有绑定（含每个绑定下的模型清单），事务内完成。
 	ReplaceApp(ctx context.Context, app string, cfgs []PlaygroundAppConfig) error
-	// ListGlobalModels 全局模型库：模型展示信息只维护一份，各工作台按类型自动注入。
-	ListGlobalModels(ctx context.Context) ([]PlaygroundGlobalModel, error)
-	// ReplaceGlobalModels 全量替换全局模型库，事务内完成。
-	ReplaceGlobalModels(ctx context.Context, models []PlaygroundGlobalModel) error
+	// ListGlobalConfigs 全局渠道配置：渠道绑定 + 各渠道下的模型清单。
+	ListGlobalConfigs(ctx context.Context) ([]PlaygroundGlobalConfig, error)
+	// ReplaceGlobalConfigs 全量替换全局渠道配置（绑定与模型），事务内完成。
+	ReplaceGlobalConfigs(ctx context.Context, cfgs []PlaygroundGlobalConfig) error
 }
 
-// PlaygroundGlobalModel 全局模型库条目：维护一份展示信息，各工作台按类型自动注入。
-type PlaygroundGlobalModel struct {
-	ID          int64     `json:"id"`
-	ModelID     string    `json:"model_id"`
-	DisplayName string    `json:"display_name"`
-	PriceLabel  string    `json:"price_label"`
-	UnitHint    string    `json:"unit_hint"`
-	Description string    `json:"description"`
-	ModelKind   string    `json:"model_kind"`
-	Enabled     bool      `json:"enabled"`
-	SortOrder   int       `json:"sort_order"`
-	MonitorID   *int64    `json:"monitor_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+// PlaygroundGlobalConfig 全局渠道绑定：一处维护「渠道 + 模型清单」，
+// 对话 / 生图 / 画布三个工作台按模型类型自动分流注入。
+type PlaygroundGlobalConfig struct {
+	ID        int64
+	GroupID   int64
+	Enabled   bool
+	Sort      int
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	// Models 该渠道下的模型清单（全量替换写入时携带，不映射为主表字段）。
+	Models []PlaygroundAppModel
+}
+
+// PlaygroundGlobalBindingView 管理端：全局渠道 + 模型清单。
+type PlaygroundGlobalBindingView struct {
+	GroupID       int64                `json:"group_id"`
+	GroupName     string               `json:"group_name"`
+	GroupPlatform string               `json:"group_platform"`
+	Enabled       bool                 `json:"enabled"`
+	Models        []PlaygroundAppModel `json:"models"`
 }
 
 // PlaygroundBindingView 管理端总览：单个分组绑定 + 模型展示清单。
@@ -291,49 +297,79 @@ func (s *PlaygroundConfigService) GetModelCandidates(ctx context.Context, groupI
 
 // ListEnabledApps 返回当前启用且绑定分组的所有应用配置（按 app 索引）。
 //
-// fork: 模型来源 = 全局模型库（按 app 允许的类型过滤）∪ 应用层手工清单（历史数据，去重）。
-// 全局库让模型展示信息只维护一份、各工作台按类型自动注入；应用层清单保留作精细覆盖。
+// fork: 模型来源 = 全局渠道配置（一处维护「渠道 + 模型」，按 app 允许的类型过滤分流）
+// ∪ 应用层手工清单（历史补录/单独覆盖，全局优先）。
 func (s *PlaygroundConfigService) ListEnabledApps(ctx context.Context) (map[string]PlaygroundRuntimeApp, error) {
+	globalCfgs, err := s.repo.ListGlobalConfigs(ctx)
+	if err != nil {
+		return nil, err
+	}
 	cfgs, err := s.repo.ListAppConfigs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	globalModels, gErr := s.repo.ListGlobalModels(ctx)
-	if gErr != nil {
-		return nil, gErr
-	}
 
-	byApp := make(map[string][]*PlaygroundAppConfig)
+	// 应用层手工清单索引：app → group_id → models（仅作全局配置之外的补录）
+	appLayer := make(map[string]map[int64][]PlaygroundAppModel)
 	for i := range cfgs {
 		c := &cfgs[i]
 		app := NormalizePlaygroundApp(c.App)
 		if app == "" || !c.Enabled {
 			continue
 		}
-		byApp[app] = append(byApp[app], c)
+		models, mErr := s.repo.ListModelsByAppConfig(ctx, c.ID)
+		if mErr != nil {
+			return nil, mErr
+		}
+		if appLayer[app] == nil {
+			appLayer[app] = make(map[int64][]PlaygroundAppModel)
+		}
+		appLayer[app][c.GroupID] = models
 	}
 
-	out := make(map[string]PlaygroundRuntimeApp, len(byApp))
-	for app, appCfgs := range byApp {
-		// 该应用允许注入的全局模型（按类型过滤；未标记全量注入，由工作台前端兜底分流）
-		globalForApp := filterGlobalModelsForApp(globalModels, app)
-		groups := make([]PlaygroundRuntimeGroup, 0, len(appCfgs))
-		for _, c := range appCfgs {
-			models, mErr := s.repo.ListModelsByAppConfig(ctx, c.ID)
-			if mErr != nil {
-				return nil, mErr
+	out := make(map[string]PlaygroundRuntimeApp, len(PlaygroundSupportedApps))
+	for _, app := range PlaygroundSupportedApps {
+		allowed := playgroundAppAllowedKinds(app)
+		groups := make([]PlaygroundRuntimeGroup, 0, len(globalCfgs))
+		seen := make(map[int64]struct{}, len(globalCfgs))
+
+		// 1) 全局渠道：按该应用允许的模型类型过滤后注入
+		for i := range globalCfgs {
+			gc := &globalCfgs[i]
+			if !gc.Enabled {
+				continue
 			}
-			merged := mergeGlobalAndAppModels(globalForApp, models)
+			injected := filterModelsByAllowedKinds(gc.Models, allowed)
+			merged := mergeGlobalAndAppModels(injected, appLayer[app][gc.GroupID])
+			if len(merged) == 0 {
+				continue
+			}
 			s.enrichMonitorStatuses(ctx, merged)
-			groups = append(groups, PlaygroundRuntimeGroup{
-				GroupID: c.GroupID,
-				Models:  merged,
-			})
+			groups = append(groups, PlaygroundRuntimeGroup{GroupID: gc.GroupID, Models: merged})
+			seen[gc.GroupID] = struct{}{}
 		}
-		injectMode := DefaultPlaygroundInjectMode(app)
+
+		// 2) 兼容：仅存在于应用层绑定、尚未纳入全局配置的渠道
+		for groupID, models := range appLayer[app] {
+			if _, ok := seen[groupID]; ok {
+				continue
+			}
+			enabled := make([]PlaygroundAppModel, 0, len(models))
+			for _, m := range models {
+				if m.Enabled {
+					enabled = append(enabled, m)
+				}
+			}
+			if len(enabled) == 0 {
+				continue
+			}
+			s.enrichMonitorStatuses(ctx, enabled)
+			groups = append(groups, PlaygroundRuntimeGroup{GroupID: groupID, Models: enabled})
+		}
+
 		out[app] = PlaygroundRuntimeApp{
 			App:        app,
-			InjectMode: injectMode,
+			InjectMode: DefaultPlaygroundInjectMode(app),
 			Groups:     groups,
 		}
 	}
@@ -355,30 +391,20 @@ func playgroundAppAllowedKinds(app string) map[string]bool {
 	}
 }
 
-// filterGlobalModelsForApp 把全局库按应用允许的类型过滤成运行时模型清单。
-// 未标记（空 kind）的模型全量注入，由各工作台前端按模型名兜底分流。
-func filterGlobalModelsForApp(all []PlaygroundGlobalModel, app string) []PlaygroundAppModel {
-	allowed := playgroundAppAllowedKinds(app)
-	out := make([]PlaygroundAppModel, 0, len(all))
-	for _, g := range all {
-		if !g.Enabled {
+// filterModelsByAllowedKinds 按应用允许的类型过滤渠道模型（剔除停用项，保持原顺序）。
+// 未标记（空 kind）的模型全量保留，由各工作台前端按模型名兜底分流。
+func filterModelsByAllowedKinds(models []PlaygroundAppModel, allowed map[string]bool) []PlaygroundAppModel {
+	out := make([]PlaygroundAppModel, 0, len(models))
+	for _, m := range models {
+		if !m.Enabled {
 			continue
 		}
-		kind := normalizeModelKind(g.ModelKind)
+		kind := normalizeModelKind(m.ModelKind)
 		if kind != "" && !allowed[kind] {
 			continue
 		}
-		out = append(out, PlaygroundAppModel{
-			ModelID:     strings.TrimSpace(g.ModelID),
-			DisplayName: strings.TrimSpace(g.DisplayName),
-			PriceLabel:  strings.TrimSpace(g.PriceLabel),
-			UnitHint:    strings.TrimSpace(g.UnitHint),
-			Description: strings.TrimSpace(g.Description),
-			Enabled:     true,
-			SortOrder:   g.SortOrder,
-			ModelKind:   kind,
-			MonitorID:   g.MonitorID,
-		})
+		m.ModelKind = kind
+		out = append(out, m)
 	}
 	return out
 }
@@ -410,46 +436,57 @@ func mergeGlobalAndAppModels(global []PlaygroundAppModel, appModels []Playground
 	return out
 }
 
-// ListGlobalModels 管理端：全局模型库清单（按排序）。
-func (s *PlaygroundConfigService) ListGlobalModels(ctx context.Context) ([]PlaygroundGlobalModel, error) {
-	models, err := s.repo.ListGlobalModels(ctx)
+// ListGlobalConfig 管理端：全局渠道配置总览（渠道 + 模型清单）。
+func (s *PlaygroundConfigService) ListGlobalConfig(ctx context.Context) ([]PlaygroundGlobalBindingView, error) {
+	cfgs, err := s.repo.ListGlobalConfigs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if models == nil {
-		models = []PlaygroundGlobalModel{}
+	groupNames, groupPlatforms := s.groupDisplayIndex(ctx)
+	views := make([]PlaygroundGlobalBindingView, 0, len(cfgs))
+	for i := range cfgs {
+		c := &cfgs[i]
+		models := c.Models
+		if models == nil {
+			models = []PlaygroundAppModel{}
+		}
+		views = append(views, PlaygroundGlobalBindingView{
+			GroupID:       c.GroupID,
+			GroupName:     groupNames[c.GroupID],
+			GroupPlatform: groupPlatforms[c.GroupID],
+			Enabled:       c.Enabled,
+			Models:        models,
+		})
 	}
-	return models, nil
+	return views, nil
 }
 
-// UpdateGlobalModels 管理端：全量替换全局模型库（归一化 + 按 model_id 去重后写入）。
-func (s *PlaygroundConfigService) UpdateGlobalModels(ctx context.Context, models []PlaygroundGlobalModel) ([]PlaygroundGlobalModel, error) {
-	normalized := make([]PlaygroundGlobalModel, 0, len(models))
-	seen := make(map[string]struct{}, len(models))
-	for i := range models {
-		m := models[i]
-		m.ModelID = strings.TrimSpace(m.ModelID)
-		if m.ModelID == "" {
+// SaveGlobalConfig 管理端：全量替换全局渠道配置（渠道绑定 + 各渠道模型清单）。
+func (s *PlaygroundConfigService) SaveGlobalConfig(ctx context.Context, bindings []PlaygroundBindingInput) error {
+	cfgs := make([]PlaygroundGlobalConfig, 0, len(bindings))
+	seen := make(map[int64]struct{}, len(bindings))
+	for i := range bindings {
+		b := &bindings[i]
+		if b.GroupID <= 0 {
 			continue
 		}
-		if _, dup := seen[m.ModelID]; dup {
+		if s.groupRepo != nil {
+			if _, err := s.groupRepo.GetByID(ctx, b.GroupID); err != nil {
+				return ErrPlaygroundGroupNotFound
+			}
+		}
+		if _, dup := seen[b.GroupID]; dup {
 			continue
 		}
-		seen[m.ModelID] = struct{}{}
-		m.DisplayName = strings.TrimSpace(m.DisplayName)
-		m.PriceLabel = strings.TrimSpace(m.PriceLabel)
-		m.UnitHint = strings.TrimSpace(m.UnitHint)
-		m.Description = strings.TrimSpace(m.Description)
-		m.ModelKind = normalizeModelKind(m.ModelKind)
-		if m.MonitorID != nil && *m.MonitorID <= 0 {
-			m.MonitorID = nil
-		}
-		normalized = append(normalized, m)
+		seen[b.GroupID] = struct{}{}
+		cfgs = append(cfgs, PlaygroundGlobalConfig{
+			GroupID: b.GroupID,
+			Enabled: b.Enabled,
+			Sort:    i,
+			Models:  s.normalizeModels(b.Models),
+		})
 	}
-	if err := s.repo.ReplaceGlobalModels(ctx, normalized); err != nil {
-		return nil, err
-	}
-	return s.ListGlobalModels(ctx)
+	return s.repo.ReplaceGlobalConfigs(ctx, cfgs)
 }
 
 // normalizeModels 归一化模型清单：去空、去重、裁剪展示字段。

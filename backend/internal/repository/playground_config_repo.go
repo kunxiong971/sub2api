@@ -185,13 +185,32 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())`,
 	return nil
 }
 
-const playgroundGlobalModelSelectColumns = `id, model_id, display_name, price_label,
+const playgroundGlobalConfigSelectColumns = `id, group_id, enabled, sort, created_at, updated_at`
+
+func scanPlaygroundGlobalConfig(scan func(dest ...any) error) (*service.PlaygroundGlobalConfig, error) {
+	c := &service.PlaygroundGlobalConfig{}
+	if err := scan(
+		&c.ID,
+		&c.GroupID,
+		&c.Enabled,
+		&c.Sort,
+		&c.CreatedAt,
+		&c.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// 全局模型行：global_config_id 复用 PlaygroundAppModel.AppConfigID 字段承载（语义同「所属绑定」）。
+const playgroundGlobalModelSelectColumns = `id, global_config_id, model_id, display_name, price_label,
 unit_hint, description, model_kind, enabled, sort_order, monitor_id, created_at, updated_at`
 
-func scanPlaygroundGlobalModel(scan func(dest ...any) error) (*service.PlaygroundGlobalModel, error) {
-	m := &service.PlaygroundGlobalModel{}
+func scanPlaygroundGlobalModel(scan func(dest ...any) error) (*service.PlaygroundAppModel, error) {
+	m := &service.PlaygroundAppModel{}
 	if err := scan(
 		&m.ID,
+		&m.AppConfigID,
 		&m.ModelID,
 		&m.DisplayName,
 		&m.PriceLabel,
@@ -209,34 +228,59 @@ func scanPlaygroundGlobalModel(scan func(dest ...any) error) (*service.Playgroun
 	return m, nil
 }
 
-// ListGlobalModels 全局模型库清单（按排序）。
-func (r *playgroundConfigRepository) ListGlobalModels(ctx context.Context) ([]service.PlaygroundGlobalModel, error) {
+// ListGlobalConfigs 全局渠道配置（渠道绑定 + 各渠道下的模型清单，按排序）。
+func (r *playgroundConfigRepository) ListGlobalConfigs(ctx context.Context) ([]service.PlaygroundGlobalConfig, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("nil playground config repository")
 	}
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT "+playgroundGlobalModelSelectColumns+"\nFROM playground_global_models\nORDER BY sort_order, id")
+		"SELECT "+playgroundGlobalConfigSelectColumns+"\nFROM playground_global_configs\nORDER BY sort, id")
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
-	models := make([]service.PlaygroundGlobalModel, 0)
+	cfgs := make([]service.PlaygroundGlobalConfig, 0)
 	for rows.Next() {
-		m, err := scanPlaygroundGlobalModel(rows.Scan)
+		c, err := scanPlaygroundGlobalConfig(rows.Scan)
 		if err != nil {
 			return nil, err
 		}
-		models = append(models, *m)
+		cfgs = append(cfgs, *c)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return models, nil
+	if len(cfgs) == 0 {
+		return cfgs, nil
+	}
+
+	modelRows, err := r.db.QueryContext(ctx,
+		"SELECT "+playgroundGlobalModelSelectColumns+"\nFROM playground_global_models\nORDER BY sort_order, id")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = modelRows.Close() }()
+
+	byConfig := make(map[int64][]service.PlaygroundAppModel, len(cfgs))
+	for modelRows.Next() {
+		m, err := scanPlaygroundGlobalModel(modelRows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		byConfig[m.AppConfigID] = append(byConfig[m.AppConfigID], *m)
+	}
+	if err := modelRows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range cfgs {
+		cfgs[i].Models = byConfig[cfgs[i].ID]
+	}
+	return cfgs, nil
 }
 
-// ReplaceGlobalModels 全量替换全局模型库（事务内：先删后插）。
-func (r *playgroundConfigRepository) ReplaceGlobalModels(ctx context.Context, models []service.PlaygroundGlobalModel) error {
+// ReplaceGlobalConfigs 全量替换全局渠道配置（事务内：先删后插；模型随绑定级联删除）。
+func (r *playgroundConfigRepository) ReplaceGlobalConfigs(ctx context.Context, cfgs []service.PlaygroundGlobalConfig) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("nil playground config repository")
 	}
@@ -251,30 +295,46 @@ func (r *playgroundConfigRepository) ReplaceGlobalModels(ctx context.Context, mo
 		}
 	}()
 
-	if _, err := tx.ExecContext(ctx, "DELETE FROM playground_global_models"); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM playground_global_configs"); err != nil {
 		return err
 	}
-	for _, m := range models {
-		if strings.TrimSpace(m.ModelID) == "" {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO playground_global_models
-  (model_id, display_name, price_label, unit_hint, description, model_kind, enabled, sort_order, monitor_id, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())`,
-			truncateString(m.ModelID, 160),
-			truncateString(m.DisplayName, 160),
-			truncateString(m.PriceLabel, 160),
-			truncateString(m.UnitHint, 160),
-			strings.TrimSpace(m.Description),
-			truncateString(m.ModelKind, 20),
-			m.Enabled,
-			m.SortOrder,
-			m.MonitorID,
-		); err != nil {
+
+	for i := range cfgs {
+		c := &cfgs[i]
+		var cfgID int64
+		if err := tx.QueryRowContext(ctx, `
+INSERT INTO playground_global_configs (group_id, enabled, sort, created_at, updated_at)
+VALUES ($1, $2, $3, NOW(), NOW())
+RETURNING id`,
+			c.GroupID, c.Enabled, c.Sort,
+		).Scan(&cfgID); err != nil {
 			return err
 		}
+
+		for _, m := range c.Models {
+			if strings.TrimSpace(m.ModelID) == "" {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO playground_global_models
+  (global_config_id, model_id, display_name, price_label, unit_hint, description, model_kind, enabled, sort_order, monitor_id, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())`,
+				cfgID,
+				truncateString(m.ModelID, 160),
+				truncateString(m.DisplayName, 160),
+				truncateString(m.PriceLabel, 160),
+				truncateString(m.UnitHint, 160),
+				strings.TrimSpace(m.Description),
+				truncateString(m.ModelKind, 20),
+				m.Enabled,
+				m.SortOrder,
+				m.MonitorID,
+			); err != nil {
+				return err
+			}
+		}
 	}
+
 	if err := tx.Commit(); err != nil {
 		return err
 	}

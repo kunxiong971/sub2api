@@ -300,7 +300,9 @@ func (r *ChannelMonitorRunner) releaseInFlight(id int64) {
 // runOne 执行单个监控的检测。普通错误只记日志；API key 解密失败会撤销任务。
 // 任务结束时（含 panic recover）必须释放 in-flight 槽。
 func (r *ChannelMonitorRunner) runOne(id int64, name string) {
-	ctx, cancel := context.WithTimeout(context.Background(), monitorRequestTimeout+monitorPingTimeout+monitorRunOneBuffer)
+	// 外层预算按最慢的 Images 探活口径给足；文本监控的实际请求仍受
+	// monitorHTTPClient 的 45s 上限约束，行为不变。
+	ctx, cancel := context.WithTimeout(context.Background(), monitorImageRequestTimeout+monitorPingTimeout+monitorRunOneBuffer)
 	defer cancel()
 
 	defer r.releaseInFlight(id)

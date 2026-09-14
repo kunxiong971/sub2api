@@ -61,6 +61,8 @@ type ChannelMonitor struct {
 	BodyOverrideMode string `json:"body_override_mode,omitempty"`
 	// BodyOverride holds the value of the "body_override" field.
 	BodyOverride map[string]interface{} `json:"body_override,omitempty"`
+	// true = judge by non-empty response body (image generation); false = text-path based (default)
+	ImageMode bool `json:"image_mode,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the ChannelMonitorQuery when eager-loading is set.
 	Edges        ChannelMonitorEdges `json:"edges"`
@@ -116,7 +118,7 @@ func (*ChannelMonitor) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case channelmonitor.FieldExtraModels, channelmonitor.FieldExtraHeaders, channelmonitor.FieldBodyOverride:
 			values[i] = new([]byte)
-		case channelmonitor.FieldEnabled:
+		case channelmonitor.FieldEnabled, channelmonitor.FieldImageMode:
 			values[i] = new(sql.NullBool)
 		case channelmonitor.FieldID, channelmonitor.FieldAccountID, channelmonitor.FieldIntervalSeconds, channelmonitor.FieldJitterSeconds, channelmonitor.FieldCreatedBy, channelmonitor.FieldTemplateID:
 			values[i] = new(sql.NullInt64)
@@ -280,6 +282,12 @@ func (_m *ChannelMonitor) assignValues(columns []string, values []any) error {
 					return fmt.Errorf("unmarshal field body_override: %w", err)
 				}
 			}
+		case channelmonitor.FieldImageMode:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field image_mode", values[i])
+			} else if value.Valid {
+				_m.ImageMode = value.Bool
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -398,6 +406,9 @@ func (_m *ChannelMonitor) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("body_override=")
 	builder.WriteString(fmt.Sprintf("%v", _m.BodyOverride))
+	builder.WriteString(", ")
+	builder.WriteString("image_mode=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ImageMode))
 	builder.WriteByte(')')
 	return builder.String()
 }

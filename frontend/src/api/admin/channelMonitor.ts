@@ -17,7 +17,7 @@ export type Provider =
   | 'minimax'
 export type MonitorStatus = 'operational' | 'degraded' | 'failed' | 'error'
 export type BodyOverrideMode = 'off' | 'merge' | 'replace'
-export type APIMode = 'chat_completions' | 'responses'
+export type APIMode = 'chat_completions' | 'responses' | 'images'
 /**
  * probe = LLM 探活（默认）；quota = 仅查关联账号用量（零 LLM 成本）；
  * quota_probe = 探活 + 配额快照挂主模型行。
@@ -95,6 +95,8 @@ export interface ChannelMonitor {
   extra_headers: Record<string, string>
   body_override_mode: BodyOverrideMode
   body_override: Record<string, unknown> | null
+  /** 图片模型探活：replace 模式下按「2xx + 响应体非空」判定（生图响应无文本） */
+  image_mode: boolean
   /** 检测模式：probe（默认）/ quota / quota_probe */
   check_mode: CheckMode
   /** 配额模式关联的账号 ID；探活模式为 null */
@@ -149,6 +151,7 @@ export interface CreateParams {
   extra_headers?: Record<string, string>
   body_override_mode?: BodyOverrideMode
   body_override?: Record<string, unknown> | null
+  image_mode?: boolean
 }
 
 // Update request: api_key 空串 = 不修改；clear_template=true 时把 template_id 置空；

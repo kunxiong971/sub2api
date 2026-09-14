@@ -707,6 +707,10 @@ func init() {
 	channelmonitor.DefaultBodyOverrideMode = channelmonitorDescBodyOverrideMode.Default.(string)
 	// channelmonitor.BodyOverrideModeValidator is a validator for the "body_override_mode" field. It is called by the builders before save.
 	channelmonitor.BodyOverrideModeValidator = channelmonitorDescBodyOverrideMode.Validators[0].(func(string) error)
+	// channelmonitorDescImageMode is the schema descriptor for image_mode field.
+	channelmonitorDescImageMode := channelmonitorFields[19].Descriptor()
+	// channelmonitor.DefaultImageMode holds the default value on creation for the image_mode field.
+	channelmonitor.DefaultImageMode = channelmonitorDescImageMode.Default.(bool)
 	channelmonitordailyrollupFields := schema.ChannelMonitorDailyRollup{}.Fields()
 	_ = channelmonitordailyrollupFields
 	// channelmonitordailyrollupDescModel is the schema descriptor for model field.

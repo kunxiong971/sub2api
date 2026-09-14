@@ -144,9 +144,10 @@ func registerPlaygroundRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		playground.GET("/configs", h.Admin.Playground.ListPlaygroundConfigs)
 		playground.PUT("/configs/:app", h.Admin.Playground.UpdatePlaygroundConfig)
 		playground.GET("/configs/:app/models/candidates", h.Admin.Playground.GetPlaygroundModelCandidates)
-		// 全局模型库：模型展示信息只维护一份，各工作台按类型自动注入
-		playground.GET("/global-models", h.Admin.Playground.ListGlobalModels)
-		playground.PUT("/global-models", h.Admin.Playground.UpdateGlobalModels)
+		// 全局渠道配置：一处维护「渠道 + 模型」，三个工作台按类型自动分流注入
+		playground.GET("/global-configs", h.Admin.Playground.ListGlobalConfig)
+		playground.PUT("/global-configs", h.Admin.Playground.UpdateGlobalConfig)
+		playground.GET("/global-configs/models/candidates", h.Admin.Playground.GetGlobalModelCandidates)
 	}
 }
 

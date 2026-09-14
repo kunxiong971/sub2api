@@ -23,11 +23,14 @@ const (
 //
 //   - chat_completions  OpenAI-compatible Chat Completions: /v1/chat/completions + messages
 //   - responses         OpenAI Responses API: /v1/responses + instructions/input
+//   - images            OpenAI Images API: /v1/images/generations + prompt（图片模型探活，
+//                       判定「2xx + data[0] 图片数据非空」，跳过 challenge 校验）
 //
 // 非 OpenAI provider 固定使用 chat_completions 作为占位默认值，避免为每个 provider 单独扩表。
 const (
 	MonitorAPIModeChatCompletions = "chat_completions"
 	MonitorAPIModeResponses       = "responses"
+	MonitorAPIModeImages          = "images"
 )
 
 // ChannelMonitor 渠道监控配置（service 层模型，不直接暴露 ent 类型）。
@@ -59,6 +62,10 @@ type ChannelMonitor struct {
 	ExtraHeaders     map[string]string // 与 adapter 默认 headers 合并，用户优先
 	BodyOverrideMode string            // off / merge / replace
 	BodyOverride     map[string]any    // 仅 mode != off 时使用
+
+	// ImageMode 图片模型探活开关（见 ent schema channel_monitors.image_mode）。
+	// false（默认）：维持原有文本判定；true：2xx + 响应体非空即算可用（纯图片响应无文本）。
+	ImageMode bool
 
 	// DuplicateOperationID is internal persistence metadata used to recover an
 	// already committed duplicate after an ambiguous idempotency-store failure.
@@ -98,6 +105,7 @@ type ChannelMonitorCreateParams struct {
 	ExtraHeaders     map[string]string
 	BodyOverrideMode string
 	BodyOverride     map[string]any
+	ImageMode        bool
 
 	// 配额模式：CheckMode 空串默认 probe；quota/quota_probe 必须关联账号。
 	CheckMode string
@@ -125,6 +133,7 @@ type ChannelMonitorUpdateParams struct {
 	ExtraHeaders     *map[string]string
 	BodyOverrideMode *string
 	BodyOverride     *map[string]any
+	ImageMode        *bool
 
 	// 配额模式：CheckMode nil = 不更新；AccountID nil = 不更新，
 	// 指向 0 = 清空关联（退回 probe 模式时由 CheckMode 分支兜底）。

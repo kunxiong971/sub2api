@@ -6,13 +6,11 @@ export default {
       chat: '对话',
       image: '生图',
       canvas: '画布',
-      global: '全局模型'
+      global: '全局配置'
     },
-    globalHint: '在全局模型库维护一份模型清单：标记类型后按需自动注入 —— 对话工作台注入「LLM 对话」；生图/画布注入「LLM 对话 + 生图」。各工作台页签下只需维护分组绑定，不必重复添加模型。',
-    globalTitle: '全局模型（{count} 个）',
-    globalAdd: '添加模型',
-    globalRemove: '删除',
-    globalEmpty: '还没有全局模型，点击「添加模型」开始维护',
+    globalHint: '在全局配置一处维护「渠道 + 模型清单」：添加渠道、拉取模型、配置展示名/价格/类型后，对话工作台注入「LLM 对话」类型，生图/画布注入「LLM 对话 + 生图」。各应用页签仅作为单一工作台的补录与覆盖，通常无需再配置。',
+    globalTag: '全局',
+    globalRowHint: '来自全局配置的生效模型：请在「全局配置」页签中修改',
     basic: '基本配置',
     addGroup: '添加分组',
     removeGroup: '移除',

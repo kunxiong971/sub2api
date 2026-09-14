@@ -158,7 +158,7 @@ func validateTemplateCreateParams(p ChannelMonitorRequestTemplateCreateParams) e
 	if err := validateAPIMode(p.Provider, p.APIMode); err != nil {
 		return ErrChannelMonitorTemplateInvalidAPIMode
 	}
-	if err := validateBodyModeForProtocol(p.Provider, p.APIMode, p.BodyOverrideMode, p.BodyOverride); err != nil {
+	if err := validateBodyModeForProtocol(p.Provider, p.APIMode, p.BodyOverrideMode, p.BodyOverride, true); err != nil {
 		return err
 	}
 	if err := validateExtraHeaders(p.ExtraHeaders); err != nil {
@@ -201,7 +201,7 @@ func applyTemplateUpdate(existing *ChannelMonitorRequestTemplate, p ChannelMonit
 	if p.BodyOverride != nil {
 		newBody = *p.BodyOverride
 	}
-	if err := validateBodyModeForProtocol(existing.Provider, newAPIMode, newMode, newBody); err != nil {
+	if err := validateBodyModeForProtocol(existing.Provider, newAPIMode, newMode, newBody, true); err != nil {
 		return err
 	}
 	existing.APIMode = newAPIMode
@@ -211,14 +211,15 @@ func applyTemplateUpdate(existing *ChannelMonitorRequestTemplate, p ChannelMonit
 }
 
 // validateBodyModeForProtocol 校验 body_override_mode 与 provider/api_mode 的协议特定要求。
-func validateBodyModeForProtocol(provider, apiMode, mode string, body map[string]any) error {
+// imageMode 为 true 时按图片探活口径校验（instructions 或 input 有一即可）。
+func validateBodyModeForProtocol(provider, apiMode, mode string, body map[string]any, imageMode bool) error {
 	if err := validateBodyModeParams(mode, body); err != nil {
 		return err
 	}
 	if defaultBodyMode(mode) != MonitorBodyOverrideModeReplace {
 		return nil
 	}
-	if err := validateReplaceRequestBody(provider, defaultAPIMode(apiMode), body); err != nil {
+	if err := validateReplaceRequestBody(provider, defaultAPIMode(apiMode), body, imageMode); err != nil {
 		return ErrChannelMonitorInvalidRequestBody
 	}
 	return nil
