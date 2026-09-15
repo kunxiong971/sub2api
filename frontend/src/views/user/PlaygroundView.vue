@@ -213,6 +213,20 @@ function buildIframeSrc(): string {
   // 始终附带 profiles（每个分组一个 profile，含模型展示元数据）。
   // 注意：即使只有一个分组也要下发——否则子应用的模型选择器会退回 /v1/models
   // 全量列表，而不是工作台配置的模型清单（含展示名/价格标签）。
+  // fork(sub2api): URL 注入载荷瘦身——生图台只消费 model_id/display_name/
+  // price_label/unit_hint/description/model_kind（见其 normalizePlaygroundModels）；
+  // monitor_status 已 bake 进 display_name（🟢/🔴 标签），long_context_* 仅对话台
+  // 使用，均从 URL 中剔除。渠道越多 URL 越长，不瘦身会撞 nginx 请求行上限返回
+  // 414（曾出现 6 渠道 9.5KB 打不开工作台）。
+  const slimModels = (models: PlaygroundInjectedModel[]) =>
+    models.map((m) => ({
+      model_id: m.model_id,
+      display_name: m.display_name,
+      price_label: m.price_label,
+      unit_hint: m.unit_hint,
+      description: m.description,
+      model_kind: m.model_kind
+    }))
   if (cfg.groups && cfg.groups.length > 0) {
     params.set(
       'profiles',
@@ -221,7 +235,7 @@ function buildIframeSrc(): string {
           name: `sub2api · ${g.groupName}`,
           baseUrl: g.apiUrl,
           apiKey: g.apiKey,
-          models: g.models
+          models: slimModels(g.models)
         }))
       )
     )

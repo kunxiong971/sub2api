@@ -63,6 +63,16 @@
 | 孤儿 key 未清理 | 已于当日 SQL 软删并验证 0 残留 | 无需操作；界面看不到属正常（软删不出现在任何列表） |
 | /pgw/v1 地址疑问 | 设计如此：密钥代理模式（真实 key 不下发浏览器，用 24h 短令牌 + 服务端转发） | 保持 |
 
+### 六次修复（urlslim-20260915）：生图台"被干成 401"实为 414 URI 超长
+
+| 项 | 内容 |
+|---|---|
+| 现象 | 用户加渠道后生图工作台打不开（用户描述为"401"） |
+| 诊断 | 逐层排查：pgw 令牌全部有效（6 渠道逐个实测 200）；sub2api 无 401/403；**draw 日志出现 10×414**（URI Too Long）→ URL 载荷 `profiles` 随渠道数膨胀：6 渠道达 **9.5KB**，超过生图台容器 nginx **默认 8KB 请求行上限**（边界实测：8100 通过 / 8300 拒绝） |
+| 修复①（服务器） | 生图台容器 nginx 放宽请求行上限至 32KB（`client_header_buffer_size 32k` + `large_client_header_buffers 4 32k`，与主站对齐）；`/opt/playground/image-app-nginx.conf`（备份 `.bak-urilimit-*`），reload 后 9.5KB/32KB URL 均 200 |
+| 修复②（代码） | URL 注入载荷瘦身（`PlaygroundView.vue` 的 `buildIframeSrc`）：`profiles` 仅保留生图台实际消费的字段（model_id/display_name/price_label/unit_hint/description/model_kind），剔除 `monitor_status`（已 bake 进 display_name）与 `long_context_*`（仅对话台用），单模型体积约省 30%；镜像 `sub2api:urlslim-20260915`（当前线上） |
+| 容量评估 | 32KB 上限 + 瘦身后约可容纳 25+ 渠道；若未来渠道数继续大增，需评估生图台改 postMessage 注入（根治 URL 长度依赖） |
+
 ### 五次修复（fix5-20260915）+ 收尾存档
 
 | 项 | 内容 |
