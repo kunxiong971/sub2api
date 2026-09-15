@@ -132,13 +132,46 @@ export async function fetchGlobalModelCandidates(groupId: number): Promise<strin
   return data?.models ?? []
 }
 
+/** 注入自检：单模型视图（含运行时富化字段，不含密钥） */
+export interface PlaygroundSelfCheckModel {
+  model_id: string
+  display_name: string
+  model_kind: string
+  monitor_status: string
+  long_context_pricing_enabled: boolean
+  long_context_threshold?: number
+  long_context_threshold_inclusive?: boolean
+}
+
+/** 注入自检：单分组视图 */
+export interface PlaygroundSelfCheckGroup {
+  group_id: number
+  group_name: string
+  models: PlaygroundSelfCheckModel[]
+}
+
+/** 注入自检：单应用视图 */
+export interface PlaygroundSelfCheckApp {
+  app: string
+  groups: PlaygroundSelfCheckGroup[]
+}
+
+/** 注入自检：预览三个工作台实际会收到的注入清单（不含密钥） */
+export async function selfCheck(): Promise<{ apps: PlaygroundSelfCheckApp[] }> {
+  const { data } = await apiClient.get<{ apps: PlaygroundSelfCheckApp[] }>(
+    '/admin/playground/self-check'
+  )
+  return data
+}
+
 export const playgroundAdminAPI = {
   listConfigs,
   updateConfig,
   fetchModelCandidates,
   listGlobalConfig,
   updateGlobalConfig,
-  fetchGlobalModelCandidates
+  fetchGlobalModelCandidates,
+  selfCheck
 }
 
 export default playgroundAdminAPI

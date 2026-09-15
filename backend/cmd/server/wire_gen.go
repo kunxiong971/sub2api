@@ -146,7 +146,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	adminService := service.NewAdminService(configConfig, userRepository, adminGroupRepository, adminAccountRepository, proxyRepository, apiKeyRepository, redeemCodeRepository, userGroupRateRepository, userRPMCache, billingCacheService, proxyExitInfoProber, proxyLatencyCache, apiKeyAuthCacheInvalidator, client, settingService, subscriptionService, userSubscriptionRepository, privacyClientFactory, openAIGatewayService, affiliateService, compositeModelRouteRepository, compositeRouteResolver, channelService)
 	channelMonitorRepository := repository.NewChannelMonitorRepository(client, db)
 	channelMonitorService := service.ProvideChannelMonitorService(channelMonitorRepository, secretEncryptor, settingService)
-	playgroundConfigService := service.NewPlaygroundConfigService(playgroundConfigRepository, adminService, groupRepository, channelMonitorService)
+	playgroundConfigService := service.NewPlaygroundConfigService(playgroundConfigRepository, adminService, groupRepository, channelMonitorService, modelPricingResolver)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService, authService, playgroundConfigService)
 	usageService := service.NewUsageService(usageLogRepository, userRepository, client, apiKeyAuthCacheInvalidator)
 	opsRepository := repository.NewOpsRepository(db)

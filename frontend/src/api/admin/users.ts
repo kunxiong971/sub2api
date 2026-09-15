@@ -219,10 +219,16 @@ export async function toggleStatus(id: number, status: 'active' | 'disabled'): P
 /**
  * Get user's API keys
  * @param id - User ID
+ * @param managed - true=only workspace-managed keys, false=only user-created keys, undefined=all
  * @returns List of user's API keys
  */
-export async function getUserApiKeys(id: number): Promise<PaginatedResponse<ApiKey>> {
-  const { data } = await apiClient.get<PaginatedResponse<ApiKey>>(`/admin/users/${id}/api-keys`)
+export async function getUserApiKeys(
+  id: number,
+  managed?: boolean
+): Promise<PaginatedResponse<ApiKey>> {
+  const { data } = await apiClient.get<PaginatedResponse<ApiKey>>(`/admin/users/${id}/api-keys`, {
+    params: managed === undefined ? {} : { managed }
+  })
   return data
 }
 

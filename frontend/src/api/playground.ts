@@ -31,6 +31,14 @@ export interface PlaygroundAppModelInfo {
    * operational / degraded / failed / error；空串/缺省 = 未关联或无检测数据
    */
   monitor_status?: string
+  /**
+   * 长上下文计费提醒（后端按「分组×模型」运行时解析，非落库字段）：
+   * enabled = 该模型启用长上下文阶梯计费；threshold = 首次跳档阈值（0 = 无）；
+   * inclusive = true 表示达到阈值即跳档（xAI 口径），false 为严格大于。
+   */
+  long_context_pricing_enabled?: boolean
+  long_context_threshold?: number
+  long_context_threshold_inclusive?: boolean
 }
 
 /** 单个应用下某个绑定分组的注入配置 */

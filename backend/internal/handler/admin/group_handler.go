@@ -959,6 +959,24 @@ func (h *GroupHandler) GetCapacitySummary(c *gin.Context) {
 	response.Success(c, results)
 }
 
+// GetManagedKeyCount returns the number of live workspace-managed API keys in a group.
+// The group deletion confirm dialog uses it to warn how many injected keys will be removed.
+// GET /api/v1/admin/groups/:id/managed-key-count
+func (h *GroupHandler) GetManagedKeyCount(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+
+	count, err := h.adminService.CountManagedGroupAPIKeys(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"count": count})
+}
+
 // GetGroupAPIKeys handles getting API keys in a group
 // GET /api/v1/admin/groups/:id/api-keys
 func (h *GroupHandler) GetGroupAPIKeys(c *gin.Context) {

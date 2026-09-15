@@ -455,6 +455,14 @@ func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service
 		// fork: 用户端隐藏工作台托管密钥（Playground · 前缀）
 		q = q.Where(apikey.Not(apikey.NameHasPrefix(filters.ExcludeNamePrefix)))
 	}
+	if filters.Managed != nil {
+		// fork: 管理端按「托管 / 自建」筛选（工作台托管 key = Playground · 前缀）
+		if *filters.Managed {
+			q = q.Where(apikey.NameHasPrefix(service.PlaygroundKeyNamePrefix))
+		} else {
+			q = q.Where(apikey.Not(apikey.NameHasPrefix(service.PlaygroundKeyNamePrefix)))
+		}
+	}
 
 	return q
 }
@@ -711,18 +719,147 @@ func (r *apiKeyRepository) SearchAPIKeys(ctx context.Context, userID int64, keyw
 	return outKeys, nil
 }
 
-// ClearGroupIDByGroupID 将指定分组的所有 API Key 的 group_id 设为 nil
-func (r *apiKeyRepository) ClearGroupIDByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	n, err := r.client.APIKey.Update().
-		Where(apikey.GroupIDEQ(groupID), apikey.DeletedAtIsNil()).
-		ClearGroupID().
-		Save(ctx)
-	return int64(n), err
+// managedAPIKeyNameLikePattern 托管 key 名称的 SQL LIKE 模式（与 service.PlaygroundKeyNamePrefix 同源）。
+const managedAPIKeyNameLikePattern = service.PlaygroundKeyNamePrefix + "%"
+
+// detachAPIKeysFromGroup 在给定执行器（可为事务 client）内完成「分组被删除」时的
+// api_keys 归属处理：
+//   - 托管 key（Playground · 前缀）：软删 —— 分组不存在后托管凭据只剩孤儿；
+//   - 用户自建 key：解绑（group_id = NULL）—— 用户自己的 key 继续可用。
+//
+// 返回 (托管软删数, 自建解绑数)。调用方须保证同一事务语义。
+func detachAPIKeysFromGroup(ctx context.Context, exec *dbent.Client, groupID int64) (int64, int64, error) {
+	res, err := exec.ExecContext(ctx, `
+		UPDATE api_keys
+		SET deleted_at = NOW(), updated_at = NOW()
+		WHERE group_id = $1 AND deleted_at IS NULL AND name LIKE $2`,
+		groupID, managedAPIKeyNameLikePattern)
+	if err != nil {
+		return 0, 0, err
+	}
+	deleted, err := res.RowsAffected()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	res, err = exec.ExecContext(ctx, `
+		UPDATE api_keys
+		SET group_id = NULL, updated_at = NOW()
+		WHERE group_id = $1 AND deleted_at IS NULL`,
+		groupID)
+	if err != nil {
+		return deleted, 0, err
+	}
+	unbound, err := res.RowsAffected()
+	if err != nil {
+		return deleted, 0, err
+	}
+	return deleted, unbound, nil
 }
 
-// UpdateGroupIDByUserAndGroup 将用户下绑定 oldGroupID 的所有 Key 迁移到 newGroupID
+// ClearGroupIDByGroupID 解绑指定分组下的 API Key（group_id = NULL）。
+//
+// fork: 托管 key（Playground · 前缀）不参与解绑 —— 由 detachAPIKeysFromGroup
+// 一并软删；分组不存在后把托管 key 解绑留在库里同样是孤儿。
+// 返回用户自建 key 的解绑数量。
+func (r *apiKeyRepository) ClearGroupIDByGroupID(ctx context.Context, groupID int64) (int64, error) {
+	_, unbound, err := detachAPIKeysFromGroup(ctx, clientFromContext(ctx, r.client), groupID)
+	return unbound, err
+}
+
+// GetManagedByUserAndGroup 精确查询用户在指定分组下的托管 key（Playground · 前缀，未删除）。
+//
+// fork: 工作台注入解析专用 —— 不再依赖分页列表窗口，避免 key 数量多时误判重建。
+// 未找到返回 service.ErrAPIKeyNotFound。
+func (r *apiKeyRepository) GetManagedByUserAndGroup(ctx context.Context, userID, groupID int64) (*service.APIKey, error) {
+	client := clientFromContext(ctx, r.client)
+	m, err := client.APIKey.Query().
+		Where(
+			apikey.DeletedAtIsNil(),
+			apikey.UserIDEQ(userID),
+			apikey.GroupIDEQ(groupID),
+			apikey.NameHasPrefix(service.PlaygroundKeyNamePrefix),
+		).
+		Order(dbent.Asc(apikey.FieldID)).
+		First(ctx)
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return nil, service.ErrAPIKeyNotFound
+		}
+		return nil, err
+	}
+	return apiKeyEntityToService(m), nil
+}
+
+// CountManagedKeysByGroupID 统计指定分组下未删除的托管 key 数量（分组删除确认文案用）。
+func (r *apiKeyRepository) CountManagedKeysByGroupID(ctx context.Context, groupID int64) (int64, error) {
+	client := clientFromContext(ctx, r.client)
+	count, err := client.APIKey.Query().
+		Where(
+			apikey.DeletedAtIsNil(),
+			apikey.GroupIDEQ(groupID),
+			apikey.NameHasPrefix(service.PlaygroundKeyNamePrefix),
+		).
+		Count(ctx)
+	return int64(count), err
+}
+
+// SoftDeleteOrphanManagedKeys 软删孤儿托管 key：group_id 为空或指向已软删/不存在的分组。
+// 返回被清理的 key 值（供调用方失效认证缓存）与数量，供管理端一次性清理历史残留。
+func (r *apiKeyRepository) SoftDeleteOrphanManagedKeys(ctx context.Context) ([]string, int64, error) {
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.QueryContext(ctx, `
+		UPDATE api_keys k
+		SET deleted_at = NOW(), updated_at = NOW()
+		WHERE k.deleted_at IS NULL
+		  AND k.name LIKE $1
+		  AND NOT EXISTS (
+		      SELECT 1 FROM groups g WHERE g.id = k.group_id AND g.deleted_at IS NULL
+		  )
+		RETURNING k.key`, managedAPIKeyNameLikePattern)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	keys := make([]string, 0, 8)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, 0, err
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return keys, int64(len(keys)), nil
+}
+
+// UpdateGroupIDByUserAndGroup 将用户下绑定 oldGroupID 的所有 Key 迁移到 newGroupID。
+//
+// fork: 托管 key 受 (user_id, group_id) 部分唯一索引约束（每个用户在每个分组下
+// 最多一把）。若用户在新分组下已有托管 key，旧的那把无法迁移（会撞索引），
+// 先软删以免整个分组替换事务失败；其余 key 正常迁移。
 func (r *apiKeyRepository) UpdateGroupIDByUserAndGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (int64, error) {
 	client := clientFromContext(ctx, r.client)
+	if _, err := client.ExecContext(ctx, `
+		UPDATE api_keys k
+		SET deleted_at = NOW(), updated_at = NOW()
+		WHERE k.user_id = $1
+		  AND k.group_id = $2
+		  AND k.deleted_at IS NULL
+		  AND k.name LIKE $3
+		  AND EXISTS (
+		      SELECT 1 FROM api_keys x
+		      WHERE x.user_id = $1
+		        AND x.group_id = $4
+		        AND x.deleted_at IS NULL
+		        AND x.name LIKE $3
+		  )`, userID, oldGroupID, managedAPIKeyNameLikePattern, newGroupID); err != nil {
+		return 0, err
+	}
+
 	n, err := client.APIKey.Update().
 		Where(apikey.UserIDEQ(userID), apikey.GroupIDEQ(oldGroupID), apikey.DeletedAtIsNil()).
 		SetGroupID(newGroupID).

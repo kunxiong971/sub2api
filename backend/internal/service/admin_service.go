@@ -22,7 +22,9 @@ type AdminService interface {
 	UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error)
 	BatchUpdateConcurrency(ctx context.Context, userIDs []int64, value int, mode string) (int, error)
 	BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error)
-	GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string) ([]APIKey, int64, error)
+	// GetUserAPIKeys 管理端读取某用户的 key 列表；managed 为 nil 时不过滤，
+	// true 只返回工作台托管 key，false 只返回用户自建 key。
+	GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string, managed *bool) ([]APIKey, int64, error)
 	GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error)
 	GetUserRPMStatus(ctx context.Context, userID int64) (*UserRPMStatus, error)
 	// GetUserBalanceHistory returns paginated balance/concurrency change records for a user.
@@ -66,6 +68,13 @@ type AdminService interface {
 	// API Key management (admin)
 	AdminUpdateAPIKeyGroupID(ctx context.Context, keyID int64, groupID *int64) (*AdminUpdateAPIKeyGroupIDResult, error)
 	AdminResetAPIKeyRateLimitUsage(ctx context.Context, keyID int64) (*APIKey, error)
+	// DeleteManagedAPIKey 删除工作台托管 key（仅接受 Playground · 前缀），返回被删除的 key。
+	DeleteManagedAPIKey(ctx context.Context, id int64) (*APIKey, error)
+	// CleanupOrphanPlaygroundKeys 清理孤儿托管 key：group_id 为空或指向已软删/不存在分组的
+	// Playground 前缀 key，返回清理数量（一次性清掉历史残留）。
+	CleanupOrphanPlaygroundKeys(ctx context.Context) (int64, error)
+	// CountManagedGroupAPIKeys 统计分组下未删除的托管 key 数量（分组删除确认提示用）。
+	CountManagedGroupAPIKeys(ctx context.Context, groupID int64) (int64, error)
 
 	// ReplaceUserGroup 替换用户的专属分组：授予新分组权限、迁移 Key、移除旧分组权限
 	ReplaceUserGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (*ReplaceUserGroupResult, error)

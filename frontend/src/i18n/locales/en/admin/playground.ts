@@ -52,7 +52,25 @@ export default {
     kindVideo: 'Video',
     kindAudio: 'Audio',
     kindHint:
-      'When set, workbenches inject the model by its marked kind (chat / image / video / audio) instead of guessing from the model name',
+      'When set, workbenches inject the model by its marked kind; leaving it empty auto-fills the kind from the model name on save',
+    kindInferredAs: 'Auto: {kind}',
+    kindInferredHint:
+      'When unset, the kind is auto-detected from the model name on save (same rules as injection routing; the backend is the single source of truth). An explicit kind always takes precedence',
+    legacyBanner:
+      'This tab shows legacy per-app entries (read-only). Use "Move to global" to merge models into the global config (same-group merge with dedup); unmigrated entries keep working as before.',
+    migrateToGlobal: 'Move to global',
+    migrating: 'Moving…',
+    migrated: 'Moved to the global config',
+    migratedNothing: 'This binding had no models of its own (models come from the global config); the legacy entry was cleaned up',
+    selfCheck: 'Self-check',
+    selfCheckLoading: 'Checking…',
+    selfCheckTitle: 'Injection self-check — what each workbench actually receives',
+    selfCheckHint:
+      'The lists below are what the three workbenches currently receive (kind-routed, with monitor status and long-context thresholds; no secrets included).',
+    selfCheckClose: 'Close',
+    selfCheckEmpty: 'No models are injected into this workbench',
+    selfCheckModelCount: '{count} models',
+    selfCheckLongCtx: 'long context ≥{threshold}',
     monitorHint:
       'When linked, the model shows a channel status tag (available / down) in Chat / Image / Canvas',
     priceHint:

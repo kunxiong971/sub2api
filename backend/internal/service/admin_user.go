@@ -601,9 +601,9 @@ func (s *adminServiceImpl) tryAccrueAffiliateRebateForAdminRecharge(ctx context.
 	}
 }
 
-func (s *adminServiceImpl) GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string) ([]APIKey, int64, error) {
+func (s *adminServiceImpl) GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string, managed *bool) ([]APIKey, int64, error) {
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
-	keys, result, err := s.apiKeyRepo.ListByUserID(ctx, userID, params, APIKeyListFilters{})
+	keys, result, err := s.apiKeyRepo.ListByUserID(ctx, userID, params, APIKeyListFilters{Managed: managed})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -625,7 +625,7 @@ func (s *adminServiceImpl) GetUserRPMStatus(ctx context.Context, userID int64) (
 		logger.LegacyPrintf("service.admin", "failed to get user rpm: user_id=%d err=%v", userID, err)
 	}
 
-	keys, _, err := s.GetUserAPIKeys(ctx, userID, 1, 1000, "", "")
+	keys, _, err := s.GetUserAPIKeys(ctx, userID, 1, 1000, "", "", nil)
 	if err != nil {
 		return nil, err
 	}

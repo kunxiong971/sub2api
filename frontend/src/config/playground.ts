@@ -97,6 +97,77 @@ export interface PlaygroundInjectedModel {
    * 空串/缺省 = 未关联监控或无检测数据，工作台不展示状态标签。
    */
   monitor_status?: string
+  /**
+   * 长上下文计费提醒（模型级，「分组×模型」粒度；阈值随定价配置由宿主后端解析下发）。
+   * 透传给 lobe 桥，用于输入框临界双倍计费提醒。
+   */
+  long_context_pricing_enabled?: boolean
+  /** 首次跳档的上下文 token 阈值（0/缺省 = 无） */
+  long_context_threshold?: number
+  /** true = 达到阈值即跳档（xAI 口径）；false = 严格大于 */
+  long_context_threshold_inclusive?: boolean
+}
+
+/**
+ * fork: 模型类型关键词表（与后端 service.InferModelKind 的 modelKindKeywordTable 保持一致）。
+ * 后端是唯一事实源：保存时自动填充、下发时兜底推断都走后端；此处仅作前端兜底
+ * （管理端「自动识别」徽章、展示层过滤等）。修改任一侧时必须同步另一侧。
+ */
+const MODEL_KIND_KEYWORDS: Array<{ kind: string; keywords: string[] }> = [
+  {
+    kind: 'image',
+    keywords: [
+      'image', 'gpt-image', 'dall-e', 'dall_e', 'flux',
+      'stable-diffusion', 'sdxl', 'midjourney', 'mj-'
+    ]
+  },
+  {
+    kind: 'video',
+    keywords: ['sora', 'veo', 'kling', 'runway', 'wanx', 'hunyuan-video', 'seedance']
+  },
+  {
+    kind: 'audio',
+    keywords: ['tts', 'whisper', 'speech', 'audio', 'voice', 'suno']
+  }
+]
+
+/** 按模型名关键词推断模型类型（大小写不敏感，未命中返回 chat）；与后端 InferModelKind 口径一致 */
+export function inferModelKind(modelId: string): string {
+  const name = (modelId ?? '').trim().toLowerCase()
+  if (!name) return 'chat'
+  for (const group of MODEL_KIND_KEYWORDS) {
+    if (group.keywords.some((kw) => name.includes(kw))) return group.kind
+  }
+  return 'chat'
+}
+
+/**
+ * fork: 各工作台允许注入的模型类型（与后端 service.playgroundAppAllowedKinds 保持一致）：
+ *   - chat（对话）   → chat
+ *   - image（生图）  → chat + image（Agent 模式需要 LLM）
+ *   - canvas（画布） → chat + image（文本节点需要 LLM）
+ * 后端下发前已按此口径分流；此处作为前端最终防串兜底，防止旧缓存/异常数据绕过分流。
+ */
+const ALLOWED_KINDS_BY_APP: Record<PlaygroundAppKey, string[]> = {
+  chat: ['chat'],
+  image: ['chat', 'image'],
+  canvas: ['chat', 'image']
+}
+
+/**
+ * fork: 按应用口径过滤待注入模型（与后端 filterModelsByAllowedKinds 同名同义）。
+ * 空 kind 的存量模型先走 inferModelKind 按模型名推断再过滤（显式指定的 kind 优先），
+ * 保证空 kind 的图片模型不会混进对话台注入清单；过滤保持原顺序。
+ */
+export function filterModelsByAllowedKinds<T extends { model_id: string; model_kind?: string }>(
+  app: PlaygroundAppKey,
+  models: T[]
+): T[] {
+  const allowed = ALLOWED_KINDS_BY_APP[app]
+  return models.filter((m) => {
+    const kind = (m.model_kind ?? '').trim().toLowerCase() || inferModelKind(m.model_id)
+    return allowed.includes(kind)
+  })
 }
 
 /** 渠道监控状态 → 展示标签（彩色圆点 + 短文案，附加在模型名后） */
@@ -124,6 +195,8 @@ export function withMonitorStatusTag(displayName?: string, status?: string): str
   const tag = monitorStatusTag(status)
   const base = (displayName ?? '').trim()
   if (!tag) return base
+  // fork: 防双标签——展示名里已含同款状态标签（如历史数据曾手工拼入）时不再重复追加
+  if (base.includes(tag)) return base
   return base ? `${base} ${tag}` : tag
 }
 
@@ -145,4 +218,27 @@ export interface PlaygroundInjectedConfig {
   models: string[]
   /** 多分组注入（多渠道），工作台据此添加多个渠道 */
   groups?: PlaygroundInjectedGroup[]
+}
+
+/**
+ * fork: 计算注入产物的内容指纹，供壳页面周期刷新时比较「实际注入内容」是否变化。
+ * 指纹覆盖 apiUrl/apiKey/分组名/模型清单（含 display_name/price_label/monitor_status
+ * 等展示元数据）——监控状态标签 bake 在 display_name 里，监控变红必然引起指纹变化；
+ * 顶层 models（兼容旧单分组字段）也纳入。不含 lobe_ticket 等短时票据。
+ * 与子应用侧（lobe/画布桥）的指纹幂等同构：内容不变时重复注入会被子应用短路。
+ */
+export function buildInjectedFingerprint(cfg: PlaygroundInjectedConfig | null): string {
+  if (!cfg) return ''
+  const groups = (cfg.groups ?? [])
+    .map((g) => {
+      const models = g.models
+        .map(
+          (m) =>
+            `${m.model_id}@${m.display_name ?? ''}@${m.price_label ?? ''}@${m.unit_hint ?? ''}@${m.description ?? ''}@${m.model_kind ?? ''}@${m.monitor_status ?? ''}`
+        )
+        .join('|')
+      return `${g.groupName}@${g.apiUrl}@${g.apiKey}[${models}]`
+    })
+    .join(';')
+  return [cfg.app, cfg.apiUrl, cfg.apiKey, cfg.groupName, cfg.models.join(','), groups].join('#')
 }

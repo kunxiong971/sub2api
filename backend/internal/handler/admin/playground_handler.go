@@ -231,3 +231,15 @@ func (h *PlaygroundHandler) GetGlobalModelCandidates(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"models": models})
 }
+
+// SelfCheck 注入自检：返回三个工作台实际会收到的注入清单（含类型分流、监控状态、
+// 长上下文阈值，不含任何密钥），供管理员一次看清注入结果。
+// GET /api/v1/admin/playground/self-check
+func (h *PlaygroundHandler) SelfCheck(c *gin.Context) {
+	apps, err := h.playgroundConfigService.SelfCheck(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"apps": apps})
+}

@@ -21,9 +21,11 @@ import {
   playgroundAdminAPI,
   type PlaygroundAppBundle,
   type PlaygroundAppModelInput,
-  type PlaygroundGlobalBindingView
+  type PlaygroundGlobalBindingView,
+  type PlaygroundSelfCheckApp
 } from '@/api/admin/playground'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { inferModelKind } from '@/config/playground'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -69,6 +71,116 @@ const forms = reactive<Record<TabKey, BindingRow[]>>({ chat: [], image: [], canv
 const pendingGroupId = ref<number | null>(null)
 const saving = ref(false)
 const fetchingGroup = ref<number | null>(null)
+// fork(方案五阶段3/4): 应用页签转为「历史补录（只读）」+ 迁移到全局；注入自检面板
+const migratingGroup = ref<number | null>(null)
+const selfCheckOpen = ref(false)
+const selfCheckLoading = ref(false)
+const selfCheckData = ref<PlaygroundSelfCheckApp[] | null>(null)
+
+/** fork: 应用页签（chat/image/canvas）为历史补录数据，整体只读 */
+const legacyTab = computed(() => activeTab.value !== 'global')
+
+const appLabel = (app: string): string => {
+  const map: Record<string, string> = {
+    chat: t('admin.playground.tabs.chat'),
+    image: t('admin.playground.tabs.image'),
+    canvas: t('admin.playground.tabs.canvas')
+  }
+  return map[app] ?? app
+}
+
+/** fork(方案五阶段3): 把应用层的历史补录绑定并入全局配置（同分组合并、大小写不敏感去重），
+ * 然后清空该应用层绑定（下发逻辑保持兼容期双读，此后数据只在全局库一份）。 */
+async function migrateBindingToGlobal(app: AppKey, binding: BindingRow) {
+  migratingGroup.value = binding.group_id
+  try {
+    const legacyModels = binding.models.filter((m) => !m.fromGlobal)
+    const globalBinding = forms.global.find((b) => b.group_id === binding.group_id)
+    let mergedCount = 0
+    if (globalBinding) {
+      const existing = new Set(globalBinding.models.map((m) => m.model_id.toLowerCase()))
+      const merged = legacyModels.filter((m) => !existing.has(m.model_id.toLowerCase()))
+      mergedCount = merged.length
+      globalBinding.models = [...globalBinding.models, ...merged]
+    } else if (legacyModels.length > 0) {
+      forms.global.push({
+        group_id: binding.group_id,
+        enabled: binding.enabled,
+        models: [...legacyModels]
+      })
+    }
+    // 从应用层移除该绑定，保存为剩余清单（可能为空 = 清掉历史补录）
+    forms[app] = forms[app].filter((b) => b.group_id !== binding.group_id)
+    await playgroundAdminAPI.updateGlobalConfig(
+      forms.global.map((b) => ({
+        group_id: b.group_id,
+        enabled: b.enabled,
+        models: b.models
+          .filter((m) => m.selected && !m.fromGlobal)
+          .map((m, idx): PlaygroundAppModelInput => ({
+            model_id: m.model_id,
+            display_name: m.display_name,
+            price_label: m.price_label,
+            unit_hint: m.unit_hint,
+            description: m.description,
+            enabled: m.enabled,
+            sort_order: m.sort_order || idx + 1,
+            model_kind: m.model_kind || '',
+            monitor_id: m.monitor_id
+          }))
+      }))
+    )
+    await playgroundAdminAPI.updateConfig(
+      app,
+      forms[app].map((b) => ({
+        group_id: b.group_id,
+        enabled: b.enabled,
+        models: b.models
+          .filter((m) => m.selected && !m.fromGlobal)
+          .map((m, idx): PlaygroundAppModelInput => ({
+            model_id: m.model_id,
+            display_name: m.display_name,
+            price_label: m.price_label,
+            unit_hint: m.unit_hint,
+            description: m.description,
+            enabled: m.enabled,
+            sort_order: m.sort_order || idx + 1,
+            model_kind: m.model_kind || '',
+            monitor_id: m.monitor_id
+          }))
+      }))
+    )
+    // fork: 空绑定（应用层没有独立模型，模型全由全局提供）迁移 = 仅清理，明确告知
+    if (mergedCount === 0) {
+      appStore.showInfo(t('admin.playground.migratedNothing'))
+    } else {
+      appStore.showSuccess(t('admin.playground.migrated'))
+    }
+    await loadData()
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.playground.errors.saveFailed')))
+    console.error('Failed to migrate binding to global:', error)
+    await loadData()
+  } finally {
+    migratingGroup.value = null
+  }
+}
+
+/** fork(方案五阶段4): 注入自检——预览三个工作台实际会收到的注入清单 */
+async function openSelfCheck() {
+  selfCheckOpen.value = true
+  selfCheckLoading.value = true
+  try {
+    const res = await playgroundAdminAPI.selfCheck()
+    selfCheckData.value = res.apps
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.playground.errors.loadFailed')))
+    console.error('Failed to load playground self-check:', error)
+    selfCheckOpen.value = false
+  } finally {
+    selfCheckLoading.value = false
+  }
+}
 
 async function loadMonitors() {
   try {
@@ -93,9 +205,9 @@ const tabs = computed(() => [
   { key: 'canvas' as TabKey, label: t('admin.playground.tabs.canvas') }
 ])
 
-/** 当前应用页签的绑定列表（全局页签下为空，模板统一引用） */
+/** 当前页签的绑定列表（模板统一引用；全局页签用 forms.global） */
 const activeBindings = computed<BindingRow[]>(() =>
-  activeTab.value === 'global' ? [] : forms[activeTab.value]
+  activeTab.value === 'global' ? forms.global : forms[activeTab.value]
 )
 
 // ==================== 全局渠道配置 ====================
@@ -127,6 +239,26 @@ const monitorOptionTitle = (id: number | null) => {
   if (!id) return ''
   const mo = monitors.value.find((m) => m.id === id)
   return mo ? `${mo.group_name} · ${mo.primary_model}` : ''
+}
+
+/** fork: 类型展示名映射（与类型下拉选项文案一致） */
+const kindLabel = (kind: string): string => {
+  const map: Record<string, string> = {
+    chat: t('admin.playground.kindChat'),
+    image: t('admin.playground.kindImage'),
+    video: t('admin.playground.kindVideo'),
+    audio: t('admin.playground.kindAudio')
+  }
+  return map[kind] ?? kind
+}
+
+/**
+ * fork: 该行的「自动识别」类型（仅当用户未显式指定 kind 时按模型名关键词推断，
+ * 与后端 InferModelKind 口径一致；保存后后端会把推断结果填充落库）。
+ */
+const inferredKind = (row: ModelRow): string => {
+  if ((row.model_kind || '').trim()) return ''
+  return inferModelKind(row.model_id)
 }
 
 const addableOptions = computed(() => {
@@ -195,13 +327,15 @@ function mergeGlobalIntoAppForms() {
     for (const binding of forms[app]) {
       const globalModels = globalByGroup.get(binding.group_id) ?? []
       if (!globalModels.length) continue
-      const existing = new Set(binding.models.map((m) => m.model_id))
+      // fork: 去重改为大小写不敏感，与后端 normalizeModels/mergeGlobalAndAppModels 口径一致
+      const existing = new Set(binding.models.map((m) => m.model_id.toLowerCase()))
       const injected: ModelRow[] = []
       for (const m of globalModels) {
-        if (existing.has(m.model_id)) continue
-        const kind = (m.model_kind || '').trim()
-        if (kind && !allowed.has(kind)) continue
-        existing.add(m.model_id)
+        if (existing.has(m.model_id.toLowerCase())) continue
+        // fork: 空 kind 与后端同口径走关键词推断，未标记的图片模型不再混入纯文本页签
+        const kind = (m.model_kind || '').trim() || inferModelKind(m.model_id)
+        if (!allowed.has(kind)) continue
+        existing.add(m.model_id.toLowerCase())
         injected.push({ ...m, selected: true, fromGlobal: true })
       }
       if (injected.length) binding.models = [...injected, ...binding.models]
@@ -231,11 +365,11 @@ async function fetchModels(groupId: number) {
         : await playgroundAdminAPI.fetchModelCandidates(tab, groupId)
     const binding = forms[tab].find((b) => b.group_id === groupId)
     if (!binding) return
-    const existing = new Set(binding.models.map((m) => m.model_id))
+    const existing = new Set(binding.models.map((m) => m.model_id.toLowerCase()))
     const base = binding.models.length
     let added = 0
     candidates.forEach((id) => {
-      if (existing.has(id)) return
+      if (existing.has(id.toLowerCase())) return
       added += 1
       binding.models.push({
         selected: false,
@@ -304,13 +438,19 @@ onMounted(loadData)
   <AppLayout>
     <div class="mx-auto max-w-6xl space-y-4">
       <!-- 页头 -->
-      <div>
-        <h1 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
-          {{ t('admin.playground.title') }}
-        </h1>
-        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {{ t('admin.playground.description') }}
-        </p>
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h1 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
+            {{ t('admin.playground.title') }}
+          </h1>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {{ t('admin.playground.description') }}
+          </p>
+        </div>
+        <!-- fork(方案五阶段4): 注入自检——一键预览三个工作台实际会收到的模型 -->
+        <button class="btn btn-secondary shrink-0" :disabled="selfCheckLoading" @click="openSelfCheck">
+          {{ selfCheckLoading ? t('admin.playground.selfCheckLoading') : t('admin.playground.selfCheck') }}
+        </button>
       </div>
 
       <!-- 应用切换 -->
@@ -337,9 +477,17 @@ onMounted(loadData)
         {{ t('admin.playground.globalHint') }}
       </div>
 
+      <!-- fork(方案五阶段3): 应用页签为历史补录数据（只读），引导迁移到全局 -->
+      <div
+        v-if="legacyTab"
+        class="rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs leading-relaxed text-gray-600 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-gray-300"
+      >
+        {{ t('admin.playground.legacyBanner') }}
+      </div>
+
       <!-- 渠道绑定区（全局 / 各应用共用同一套「添加渠道 + 拉取模型」编辑体验） -->
-      <!-- 添加分组 -->
-      <div class="flex items-center gap-3">
+      <!-- 添加分组（应用页签只读，仅全局可添加） -->
+      <div v-if="!legacyTab" class="flex items-center gap-3">
         <div class="w-72">
           <Select
             v-model="pendingGroupId"
@@ -384,15 +532,27 @@ onMounted(loadData)
             </span>
           </div>
           <div class="flex items-center gap-3">
-            <label class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.playground.enabled') }}
-              <Toggle v-model="binding.enabled" />
-            </label>
+            <template v-if="!legacyTab">
+              <label class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.playground.enabled') }}
+                <Toggle v-model="binding.enabled" />
+              </label>
+              <button
+                class="btn btn-ghost btn-sm text-red-600"
+                @click="removeBinding(binding.group_id)"
+              >
+                {{ t('admin.playground.removeGroup') }}
+              </button>
+            </template>
+            <!-- fork(方案五阶段3): 历史补录绑定一键并入全局配置。
+                 迁移期间禁用全部迁移按钮：两次迁移并发时后落库的保存可能覆盖前一次的合并结果。 -->
             <button
-              class="btn btn-ghost btn-sm text-red-600"
-              @click="removeBinding(binding.group_id)"
+              v-else
+              class="btn btn-secondary btn-sm"
+              :disabled="migratingGroup !== null"
+              @click="migrateBindingToGlobal(activeTab as AppKey, binding)"
             >
-              {{ t('admin.playground.removeGroup') }}
+              {{ migratingGroup === binding.group_id ? t('admin.playground.migrating') : t('admin.playground.migrateToGlobal') }}
             </button>
           </div>
         </div>
@@ -465,7 +625,7 @@ onMounted(loadData)
                       v-model="row.selected"
                       type="checkbox"
                       class="h-3.5 w-3.5"
-                      :disabled="row.fromGlobal"
+                      :disabled="legacyTab || row.fromGlobal"
                       :title="row.fromGlobal ? t('admin.playground.globalRowHint') : ''"
                     />
                   </td>
@@ -484,7 +644,7 @@ onMounted(loadData)
                       v-model="row.display_name"
                       type="text"
                       class="input h-7 w-32 px-2 py-0.5 text-xs"
-                      :disabled="row.fromGlobal"
+                      :disabled="legacyTab || row.fromGlobal"
                     />
                   </td>
                   <td class="px-3 py-2">
@@ -493,7 +653,7 @@ onMounted(loadData)
                       type="text"
                       class="input h-7 w-28 px-2 py-0.5 text-xs"
                       placeholder="0.5 积分/次"
-                      :disabled="row.fromGlobal"
+                      :disabled="legacyTab || row.fromGlobal"
                     />
                   </td>
                   <td class="px-3 py-2">
@@ -501,7 +661,7 @@ onMounted(loadData)
                       v-model="row.unit_hint"
                       type="text"
                       class="input h-7 w-20 px-2 py-0.5 text-xs"
-                      :disabled="row.fromGlobal"
+                      :disabled="legacyTab || row.fromGlobal"
                     />
                   </td>
                   <td class="px-3 py-2">
@@ -509,29 +669,39 @@ onMounted(loadData)
                       v-model="row.description"
                       type="text"
                       class="input h-7 w-40 px-2 py-0.5 text-xs"
-                      :disabled="row.fromGlobal"
+                      :disabled="legacyTab || row.fromGlobal"
                     />
                   </td>
                   <td class="px-3 py-2">
-                    <select
-                      v-model="row.model_kind"
-                      class="input h-7 w-24 px-1.5 py-0.5 text-xs"
-                      :title="t('admin.playground.kindHint')"
-                      :disabled="row.fromGlobal"
-                    >
-                      <option value="">{{ t('admin.playground.kindAuto') }}</option>
-                      <option value="chat">{{ t('admin.playground.kindChat') }}</option>
-                      <option value="image">{{ t('admin.playground.kindImage') }}</option>
-                      <option value="video">{{ t('admin.playground.kindVideo') }}</option>
-                      <option value="audio">{{ t('admin.playground.kindAudio') }}</option>
-                    </select>
+                    <div class="flex flex-col gap-1">
+                      <select
+                        v-model="row.model_kind"
+                        class="input h-7 w-24 px-1.5 py-0.5 text-xs"
+                        :title="t('admin.playground.kindHint')"
+                        :disabled="legacyTab || row.fromGlobal"
+                      >
+                        <option value="">{{ t('admin.playground.kindAuto') }}</option>
+                        <option value="chat">{{ t('admin.playground.kindChat') }}</option>
+                        <option value="image">{{ t('admin.playground.kindImage') }}</option>
+                        <option value="video">{{ t('admin.playground.kindVideo') }}</option>
+                        <option value="audio">{{ t('admin.playground.kindAudio') }}</option>
+                      </select>
+                      <!-- fork: 未显式指定类型时提示保存后将按模型名自动识别（口径与后端 InferModelKind 一致） -->
+                      <span
+                        v-if="inferredKind(row)"
+                        class="inline-block w-fit rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/10 dark:text-amber-400"
+                        :title="t('admin.playground.kindInferredHint')"
+                      >
+                        {{ t('admin.playground.kindInferredAs', { kind: kindLabel(inferredKind(row)) }) }}
+                      </span>
+                    </div>
                   </td>
                   <td class="px-3 py-2">
                     <select
                       v-model="row.monitor_id"
                       class="input h-7 w-36 px-1.5 py-0.5 text-xs"
                       :title="monitorOptionTitle(row.monitor_id)"
-                      :disabled="row.fromGlobal"
+                      :disabled="legacyTab || row.fromGlobal"
                     >
                       <option :value="null">{{ t('admin.playground.monitorNone') }}</option>
                       <option v-for="mo in monitors" :key="mo.id" :value="mo.id">
@@ -544,7 +714,7 @@ onMounted(loadData)
                       v-model.number="row.sort_order"
                       type="number"
                       class="input h-7 w-14 px-2 py-0.5 text-xs"
-                      :disabled="row.fromGlobal"
+                      :disabled="legacyTab || row.fromGlobal"
                     />
                   </td>
                   <td class="px-3 py-2">
@@ -552,7 +722,7 @@ onMounted(loadData)
                       v-model="row.enabled"
                       type="checkbox"
                       class="h-3.5 w-3.5"
-                      :disabled="row.fromGlobal"
+                      :disabled="legacyTab || row.fromGlobal"
                     />
                   </td>
                 </tr>
@@ -562,11 +732,88 @@ onMounted(loadData)
         </div>
       </section>
 
-      <!-- 保存 -->
-      <div class="flex justify-end">
+      <!-- 保存（fork: 应用页签只读，仅全局页签可保存） -->
+      <div v-if="!legacyTab" class="flex justify-end">
         <button class="btn btn-primary" :disabled="saving || loading" @click="saveAll">
           {{ saving ? t('admin.playground.saving') : t('admin.playground.save') }}
         </button>
+      </div>
+
+      <!-- fork(方案五阶段4): 注入自检弹窗——三个工作台实际收到的注入清单 -->
+      <div
+        v-if="selfCheckOpen"
+        class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
+        @click.self="selfCheckOpen = false"
+      >
+        <div class="w-full max-w-4xl rounded-2xl bg-white p-5 shadow-xl dark:bg-dark-800">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100">
+              {{ t('admin.playground.selfCheckTitle') }}
+            </h2>
+            <button
+              class="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-200"
+              :title="t('admin.playground.selfCheckClose')"
+              @click="selfCheckOpen = false"
+            >
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.playground.selfCheckHint') }}
+          </p>
+          <div class="space-y-4">
+            <section
+              v-for="app in selfCheckData ?? []"
+              :key="app.app"
+              class="rounded-xl border border-gray-200 p-3 dark:border-dark-600"
+            >
+              <div class="mb-2 flex items-center gap-2">
+                <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {{ appLabel(app.app) }}
+                </span>
+                <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500 dark:bg-dark-700 dark:text-gray-400">
+                  {{ t('admin.playground.selfCheckModelCount', { count: app.groups.reduce((n, g) => n + g.models.length, 0) }) }}
+                </span>
+              </div>
+              <p v-if="app.groups.length === 0" class="py-3 text-center text-xs text-gray-400">
+                {{ t('admin.playground.selfCheckEmpty') }}
+              </p>
+              <div v-for="g in app.groups" :key="g.group_id" class="mb-2 last:mb-0">
+                <div class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                  {{ g.group_name || `#${g.group_id}` }}
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                  <span
+                    v-for="m in g.models"
+                    :key="m.model_id"
+                    class="inline-flex items-center gap-1 rounded-md border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-700 dark:border-dark-600 dark:text-gray-300"
+                  >
+                    <span
+                      class="inline-block h-1.5 w-1.5 rounded-full"
+                      :class="{
+                        'bg-emerald-500': m.monitor_status === 'operational',
+                        'bg-amber-500': m.monitor_status === 'degraded',
+                        'bg-red-500': m.monitor_status === 'failed' || m.monitor_status === 'error',
+                        'bg-gray-300 dark:bg-dark-600': !m.monitor_status
+                      }"
+                    />
+                    {{ m.display_name || m.model_id }}
+                    <span class="text-gray-400">· {{ kindLabel(m.model_kind || '') }}</span>
+                    <span
+                      v-if="m.long_context_pricing_enabled && (m.long_context_threshold ?? 0) > 0"
+                      class="text-amber-600 dark:text-amber-400"
+                      :title="t('admin.playground.selfCheckLongCtx', { threshold: m.long_context_threshold ?? 0 })"
+                    >
+                      · {{ t('admin.playground.selfCheckLongCtx', { threshold: m.long_context_threshold ?? 0 }) }}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
       </div>
     </div>
   </AppLayout>

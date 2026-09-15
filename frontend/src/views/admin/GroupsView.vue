@@ -4824,6 +4824,8 @@ const submitting = ref(false);
 const sortSubmitting = ref(false);
 const editingGroup = ref<AdminGroup | null>(null);
 const deletingGroup = ref<AdminGroup | null>(null);
+// fork(sub2api): 待删除分组下的工作台托管密钥数量（删除确认提示用）
+const deletingGroupManagedKeyCount = ref(0);
 const duplicatingGroupIds = reactive(new Set<number>());
 const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
@@ -5532,12 +5534,25 @@ const deleteConfirmMessage = computed(() => {
   if (!deletingGroup.value) {
     return "";
   }
+  // fork(sub2api): 命中工作台托管密钥时追加提示（删除分组会一并软删这些 key）
+  const managedSuffix =
+    deletingGroupManagedKeyCount.value > 0
+      ? " " +
+        t("admin.groups.deleteConfirmManagedKeys", {
+          count: deletingGroupManagedKeyCount.value,
+        })
+      : "";
   if (deletingGroup.value.subscription_type === "subscription") {
-    return t("admin.groups.deleteConfirmSubscription", {
-      name: deletingGroup.value.name,
-    });
+    return (
+      t("admin.groups.deleteConfirmSubscription", {
+        name: deletingGroup.value.name,
+      }) + managedSuffix
+    );
   }
-  return t("admin.groups.deleteConfirm", { name: deletingGroup.value.name });
+  return (
+    t("admin.groups.deleteConfirm", { name: deletingGroup.value.name }) +
+    managedSuffix
+  );
 });
 
 const loadLiveCapability = async () => {
@@ -6598,9 +6613,17 @@ const previewCompositeRoute = async () => {
   }
 };
 
-const handleDelete = (group: AdminGroup) => {
+const handleDelete = async (group: AdminGroup) => {
   deletingGroup.value = group;
+  deletingGroupManagedKeyCount.value = 0;
   showDeleteDialog.value = true;
+  // fork(sub2api): 删除分组会同时清理该分组下的工作台托管密钥，先取数量提示管理员
+  try {
+    const res = await adminAPI.groups.getManagedKeyCount(group.id);
+    deletingGroupManagedKeyCount.value = res?.count ?? 0;
+  } catch {
+    deletingGroupManagedKeyCount.value = 0;
+  }
 };
 
 const confirmDelete = async () => {

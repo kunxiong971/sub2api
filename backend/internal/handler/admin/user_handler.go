@@ -429,7 +429,14 @@ func (h *UserHandler) GetUserAPIKeys(c *gin.Context) {
 	sortBy := c.DefaultQuery("sort_by", "created_at")
 	sortOrder := c.DefaultQuery("sort_order", "desc")
 
-	keys, total, err := h.adminService.GetUserAPIKeys(c.Request.Context(), userID, page, pageSize, sortBy, sortOrder)
+	// managed=true 只看工作台托管 key，managed=false 只看用户自建 key，缺省不过滤。
+	managed, err := parseOptionalBoolDashboardFilter(c, "managed")
+	if err != nil {
+		response.BadRequest(c, "Invalid managed value, use true or false")
+		return
+	}
+
+	keys, total, err := h.adminService.GetUserAPIKeys(c.Request.Context(), userID, page, pageSize, sortBy, sortOrder, managed)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

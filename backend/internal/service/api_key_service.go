@@ -309,6 +309,8 @@ type APIKeyService struct {
 	authInvalidationFailures  atomic.Uint64
 	lastUsedTouchL1           sync.Map // keyID -> nextAllowedAt(time.Time)
 	lastUsedTouchSF           singleflight.Group
+	// playgroundKeySF 折叠同 uid+gid 的托管 key 创建请求（工作台注入幂等）。
+	playgroundKeySF singleflight.Group
 }
 
 type APIKeyAuthLookupMetrics struct {

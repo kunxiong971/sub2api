@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -65,34 +64,13 @@ func pgwCacheKey(userID, groupID int64) string {
 	return fmt.Sprintf("%d:%d", userID, groupID)
 }
 
-// resolvePlaygroundKey 找到（或创建）用户在指定分组下的 playground key。
-func (h *APIKeyHandler) resolvePlaygroundKey(ctx context.Context, userID, groupID int64, groupName string) (*service.APIKey, error) {
-	params := pagination.PaginationParams{
-		Page:      1,
-		PageSize:  1000,
-		SortBy:    "created_at",
-		SortOrder: "desc",
-	}
-	keys, _, err := h.apiKeyService.List(ctx, userID, params, service.APIKeyListFilters{
-		Status: service.StatusActive,
-	})
-	if err != nil {
-		return nil, err
-	}
-	for i := range keys {
-		k := &keys[i]
-		if k.GroupID != nil && *k.GroupID == groupID {
-			return k, nil
-		}
-	}
-	name := groupName
-	if strings.TrimSpace(name) == "" {
-		name = fmt.Sprintf("Group #%d", groupID)
-	}
-	return h.apiKeyService.Create(ctx, userID, service.CreateAPIKeyRequest{
-		Name:    service.PlaygroundKeyNamePrefix + name,
-		GroupID: &groupID,
-	})
+// resolvePlaygroundKey 找到（或创建）用户在指定分组下的托管 key。
+//
+// fork: 原先从「最近 1000 条 active key」内存过滤，key 多时会误判为缺失而重复创建；
+// 现在统一走服务层 EnsurePlaygroundKey（按 uid+gid 精确查询 + singleflight +
+// 唯一索引兜底），命名统一为 `Playground · <分组名>`（分组名由服务层回查）。
+func (h *APIKeyHandler) resolvePlaygroundKey(ctx context.Context, userID, groupID int64) (*service.APIKey, error) {
+	return h.apiKeyService.EnsurePlaygroundKey(ctx, userID, groupID, "")
 }
 
 // PGWCORS 为 /pgw 提供跨域支持（工作台部署在同根域名的其他子域名上）。
@@ -133,7 +111,7 @@ func (h *APIKeyHandler) PGWTokenAuth() gin.HandlerFunc {
 		if cached, ok := pgwKeyCacheInstance.get(userID, groupID); ok {
 			apiKey = cached
 		} else {
-			apiKey, err = h.resolvePlaygroundKey(c.Request.Context(), userID, groupID, "")
+			apiKey, err = h.resolvePlaygroundKey(c.Request.Context(), userID, groupID)
 			if err != nil {
 				response.ErrorFrom(c, err)
 				return

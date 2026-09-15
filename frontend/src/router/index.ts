@@ -236,7 +236,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      title: 'AI Chat',
+      title: '对话',
       app: 'chat'
     }
   },
@@ -247,7 +247,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      title: 'Image Studio',
+      title: '生图工作台',
       app: 'image'
     }
   },
@@ -258,7 +258,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      title: 'Infinite Canvas',
+      title: '无限画布',
       app: 'canvas'
     }
   },

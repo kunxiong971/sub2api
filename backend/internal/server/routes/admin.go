@@ -148,6 +148,8 @@ func registerPlaygroundRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		playground.GET("/global-configs", h.Admin.Playground.ListGlobalConfig)
 		playground.PUT("/global-configs", h.Admin.Playground.UpdateGlobalConfig)
 		playground.GET("/global-configs/models/candidates", h.Admin.Playground.GetGlobalModelCandidates)
+		// fork: 注入自检——三个工作台实际会收到的注入清单（不含密钥）
+		playground.GET("/self-check", h.Admin.Playground.SelfCheck)
 	}
 }
 
@@ -203,6 +205,9 @@ func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	apiKeys := admin.Group("/api-keys")
 	{
 		apiKeys.PUT("/:id", h.Admin.APIKey.UpdateGroup)
+		// fork: 工作台托管 key 管理（删除单把 / 清理孤儿）
+		apiKeys.DELETE("/:id", h.Admin.APIKey.Delete)
+		apiKeys.POST("/cleanup-orphans", h.Admin.APIKey.CleanupOrphans)
 	}
 }
 
@@ -369,6 +374,8 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.PUT("/:id/rpm-overrides", h.Admin.Group.BatchSetGroupRPMOverrides)
 		groups.DELETE("/:id/rpm-overrides", h.Admin.Group.ClearGroupRPMOverrides)
 		groups.GET("/:id/api-keys", h.Admin.Group.GetGroupAPIKeys)
+		// fork: 分组下工作台托管 key 数量（删除确认提示用）
+		groups.GET("/:id/managed-key-count", h.Admin.Group.GetManagedKeyCount)
 	}
 }
 

@@ -145,4 +145,7 @@ type APIKeyListFilters struct {
 	GroupID *int64
 	// ExcludeNamePrefix 排除指定名称前缀的 key（用于用户端隐藏工作台托管密钥）。
 	ExcludeNamePrefix string
+	// Managed 是否为工作台托管 key（Playground 前缀）：nil=不筛选，true=仅托管，false=仅自建。
+	// 管理端列表用它在「全部 / 托管 / 自建」之间切换。
+	Managed *bool
 }

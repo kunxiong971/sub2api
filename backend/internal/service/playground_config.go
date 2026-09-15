@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -52,21 +53,44 @@ var (
 	ErrPlaygroundModelRequired = infraerrors.BadRequest("PLAYGROUND_MODEL_REQUIRED", "model id is required")
 	// ErrPlaygroundKeyManaged 工作台托管密钥不允许用户删除/编辑（阶段 C 锁死）。
 	ErrPlaygroundKeyManaged = infraerrors.Forbidden("PLAYGROUND_KEY_MANAGED", "工作台托管密钥不可删除或编辑")
+	// ErrPlaygroundKeyNotManaged 管理端托管 key 专用接口只接受 Playground 前缀的 key。
+	ErrPlaygroundKeyNotManaged = infraerrors.BadRequest("PLAYGROUND_KEY_NOT_MANAGED", "该密钥不是工作台托管密钥")
 )
 
 // PlaygroundKeyNamePrefix 集成工作台自动创建的 key 名称前缀。
 const PlaygroundKeyNamePrefix = "Playground · "
+
+// playgroundKeyNameMaxRunes api_keys.name 列上限（varchar(100)，按字符计）。
+const playgroundKeyNameMaxRunes = 100
 
 // IsManagedPlaygroundKeyName 判断 key 名称是否属于工作台托管密钥。
 func IsManagedPlaygroundKeyName(name string) bool {
 	return strings.HasPrefix(name, PlaygroundKeyNamePrefix)
 }
 
+// PlaygroundKeyDisplayName 生成工作台托管 key 的统一展示名：`Playground · <分组名>`。
+// 所有创建入口（注入配置接口 / /pgw 代理）都必须经此命名，避免同组出现
+// `Playground · Group #N` 与 `Playground · <分组名>` 两把不同名的密钥。
+// 分组名缺失时回退为「分组 #<id>」；超长时截断，保证不超过 api_keys.name 上限。
+func PlaygroundKeyDisplayName(groupName string, groupID int64) string {
+	name := strings.TrimSpace(groupName)
+	if name == "" {
+		name = fmt.Sprintf("分组 #%d", groupID)
+	}
+	limit := playgroundKeyNameMaxRunes - len([]rune(PlaygroundKeyNamePrefix))
+	runes := []rune(name)
+	if limit > 0 && len(runes) > limit {
+		runes = runes[:limit]
+	}
+	return PlaygroundKeyNamePrefix + string(runes)
+}
+
 // PlaygroundAppModel 应用下单个模型的展示配置。
 //
 // DisplayName / PriceLabel / UnitHint 纯展示，不参与计费；
 // 模型类型标记：管理端可为每个注入模型显式指定类型，工作台按类型分流注入
-// （对话进 Chat、生图进 Images、视频/语音同理）；空串 = 未标记，按模型名关键词自动推断。
+// （对话进 Chat、生图进 Images、视频/语音同理）；空串 = 保存时按模型名关键词
+// 自动填充（InferModelKind），存量空值在下发时兜底推断。
 const (
 	ModelKindChat  = "chat"
 	ModelKindImage = "image"
@@ -85,15 +109,22 @@ type PlaygroundAppModel struct {
 	Description string    `json:"description"`
 	Enabled     bool      `json:"enabled"`
 	SortOrder   int       `json:"sort_order"`
-	// ModelKind 模型类型标记：chat/image/video/audio；空串 = 按模型名自动推断。
+	// ModelKind 模型类型标记：chat/image/video/audio；空串 = 保存时按 InferModelKind 自动填充。
 	ModelKind string `json:"model_kind,omitempty"`
 	// MonitorID 可选关联的渠道监控（展示层软引用，仅用于下发状态标签）。
 	MonitorID *int64 `json:"monitor_id,omitempty"`
 	// MonitorStatus 关联监控的最近检测状态（下发时快照）：
 	// operational / degraded / failed / error；空串 = 未关联或无检测数据。
 	MonitorStatus string    `json:"monitor_status,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	// —— 长上下文计费提醒（运行时富化字段，不落库：阈值随定价配置变）——
+	// LongContextPricingEnabled 该「分组×模型」当前是否启用长上下文阶梯计费。
+	LongContextPricingEnabled bool `json:"long_context_pricing_enabled,omitempty"`
+	// LongContextThreshold 首次跳档的上下文 token 阈值（0 = 无）。
+	LongContextThreshold int `json:"long_context_threshold,omitempty"`
+	// LongContextThresholdInclusive true = 达到阈值即跳档（xAI 口径）；false = 严格大于。
+	LongContextThresholdInclusive bool `json:"long_context_threshold_inclusive,omitempty"`
+	CreatedAt                     time.Time `json:"created_at"`
+	UpdatedAt                     time.Time `json:"updated_at"`
 }
 
 // PlaygroundAppConfig 单个「应用 × 分组」绑定。
@@ -182,22 +213,47 @@ type PlaygroundConfigService struct {
 	adminService   AdminService
 	groupRepo      GroupRepository
 	monitorService *ChannelMonitorService
+	// pricingResolver 可选（测试/最小装配可为 nil，nil 时不下发长上下文字段）：
+	// 下发时按「分组×模型」解析长上下文计费阈值，供对话工作台做临界双倍计费提醒。
+	pricingResolver *ModelPricingResolver
 }
 
 // NewPlaygroundConfigService 创建工作台注入配置服务。
-// monitorService 可为 nil（测试场景）：nil 时模型状态标签不下发。
+// monitorService / pricingResolver 均可为 nil（测试场景）：
+// nil monitorService 时模型状态标签不下发；nil pricingResolver 时长上下文阈值不下发。
 func NewPlaygroundConfigService(
 	repo PlaygroundConfigRepository,
 	adminService AdminService,
 	groupRepo GroupRepository,
 	monitorService *ChannelMonitorService,
+	pricingResolver *ModelPricingResolver,
 ) *PlaygroundConfigService {
 	return &PlaygroundConfigService{
-		repo:           repo,
-		adminService:   adminService,
-		groupRepo:      groupRepo,
-		monitorService: monitorService,
+		repo:            repo,
+		adminService:    adminService,
+		groupRepo:       groupRepo,
+		monitorService:  monitorService,
+		pricingResolver: pricingResolver,
 	}
+}
+
+// groupExists 判断分组是否仍存在（未软删）。groupRepo 缺省（部分测试装配）时
+// 一律视为存在，不启用僵尸绑定过滤。
+// 背景：分组删除时未同步清理注入配置，留下指向已删分组的“僵尸绑定”——
+// 会导致管理端保存被 ErrPlaygroundGroupNotFound 整单拒绝、运行时向死分组路由。
+func (s *PlaygroundConfigService) groupExists(ctx context.Context, groupID int64, cache map[int64]bool) bool {
+	if s.groupRepo == nil {
+		return true
+	}
+	if v, ok := cache[groupID]; ok {
+		return v
+	}
+	exists := false
+	if _, err := s.groupRepo.GetByID(ctx, groupID); err == nil {
+		exists = true
+	}
+	cache[groupID] = exists
+	return exists
 }
 
 // ListApps 返回三个应用的配置总览（每个应用含其绑定的多个分组）。
@@ -206,6 +262,15 @@ func (s *PlaygroundConfigService) ListApps(ctx context.Context) ([]PlaygroundApp
 	if err != nil {
 		return nil, err
 	}
+	// fork: 过滤指向已删除分组的僵尸绑定，管理端不再出现幽灵分组
+	existsCache := make(map[int64]bool)
+	kept := make([]PlaygroundAppConfig, 0, len(cfgs))
+	for i := range cfgs {
+		if s.groupExists(ctx, cfgs[i].GroupID, existsCache) {
+			kept = append(kept, cfgs[i])
+		}
+	}
+	cfgs = kept
 	groupNames, groupPlatforms := s.groupDisplayIndex(ctx)
 
 	bundles := make([]PlaygroundAppBundle, 0, len(PlaygroundSupportedApps))
@@ -309,12 +374,26 @@ func (s *PlaygroundConfigService) ListEnabledApps(ctx context.Context) (map[stri
 		return nil, err
 	}
 
+	// fork: 过滤指向已删除分组的僵尸绑定（历史遗留：分组删除未同步清理注入配置），
+	// 避免运行时向死分组路由；管理端同样按此过滤，保存不再被整单拒绝。
+	existsCache := make(map[int64]bool)
+	keptGlobal := make([]PlaygroundGlobalConfig, 0, len(globalCfgs))
+	for i := range globalCfgs {
+		if s.groupExists(ctx, globalCfgs[i].GroupID, existsCache) {
+			keptGlobal = append(keptGlobal, globalCfgs[i])
+		}
+	}
+	globalCfgs = keptGlobal
+
 	// 应用层手工清单索引：app → group_id → models（仅作全局配置之外的补录）
 	appLayer := make(map[string]map[int64][]PlaygroundAppModel)
 	for i := range cfgs {
 		c := &cfgs[i]
 		app := NormalizePlaygroundApp(c.App)
 		if app == "" || !c.Enabled {
+			continue
+		}
+		if !s.groupExists(ctx, c.GroupID, existsCache) {
 			continue
 		}
 		models, mErr := s.repo.ListModelsByAppConfig(ctx, c.ID)
@@ -328,6 +407,8 @@ func (s *PlaygroundConfigService) ListEnabledApps(ctx context.Context) (map[stri
 	}
 
 	out := make(map[string]PlaygroundRuntimeApp, len(PlaygroundSupportedApps))
+	// fork: 长上下文阈值富化用的分组缓存（同一分组被 chat/image/canvas 三个应用复用，只查一次）
+	groupCache := make(map[int64]*Group)
 	for _, app := range PlaygroundSupportedApps {
 		allowed := playgroundAppAllowedKinds(app)
 		groups := make([]PlaygroundRuntimeGroup, 0, len(globalCfgs))
@@ -345,26 +426,25 @@ func (s *PlaygroundConfigService) ListEnabledApps(ctx context.Context) (map[stri
 				continue
 			}
 			s.enrichMonitorStatuses(ctx, merged)
+			s.enrichLongContextPricing(ctx, gc.GroupID, merged, groupCache)
 			groups = append(groups, PlaygroundRuntimeGroup{GroupID: gc.GroupID, Models: merged})
 			seen[gc.GroupID] = struct{}{}
 		}
 
 		// 2) 兼容：仅存在于应用层绑定、尚未纳入全局配置的渠道
+		// fork: 历史补录清单同样按类型严格分流（空 kind 走 InferModelKind 推断、
+		// 显式 kind 优先），与全局库口径一致，防止空 kind 图片模型混入对话台。
 		for groupID, models := range appLayer[app] {
 			if _, ok := seen[groupID]; ok {
 				continue
 			}
-			enabled := make([]PlaygroundAppModel, 0, len(models))
-			for _, m := range models {
-				if m.Enabled {
-					enabled = append(enabled, m)
-				}
-			}
-			if len(enabled) == 0 {
+			injected := filterModelsByAllowedKinds(models, allowed)
+			if len(injected) == 0 {
 				continue
 			}
-			s.enrichMonitorStatuses(ctx, enabled)
-			groups = append(groups, PlaygroundRuntimeGroup{GroupID: groupID, Models: enabled})
+			s.enrichMonitorStatuses(ctx, injected)
+			s.enrichLongContextPricing(ctx, groupID, injected, groupCache)
+			groups = append(groups, PlaygroundRuntimeGroup{GroupID: groupID, Models: injected})
 		}
 
 		out[app] = PlaygroundRuntimeApp{
@@ -392,7 +472,9 @@ func playgroundAppAllowedKinds(app string) map[string]bool {
 }
 
 // filterModelsByAllowedKinds 按应用允许的类型过滤渠道模型（剔除停用项，保持原顺序）。
-// 未标记（空 kind）的模型全量保留，由各工作台前端按模型名兜底分流。
+// fork: 存量空 kind 的模型先走 InferModelKind 统一推断再过滤，防历史数据绕过分流
+// （如空 kind 的 gpt-image-2 不得混进对话台/lobe 注入清单，也不得漏出生图台）；
+// 显式指定的 kind 优先，不受关键词推断影响。
 func filterModelsByAllowedKinds(models []PlaygroundAppModel, allowed map[string]bool) []PlaygroundAppModel {
 	out := make([]PlaygroundAppModel, 0, len(models))
 	for _, m := range models {
@@ -400,7 +482,10 @@ func filterModelsByAllowedKinds(models []PlaygroundAppModel, allowed map[string]
 			continue
 		}
 		kind := normalizeModelKind(m.ModelKind)
-		if kind != "" && !allowed[kind] {
+		if kind == "" {
+			kind = InferModelKind(m.ModelID)
+		}
+		if !allowed[kind] {
 			continue
 		}
 		m.ModelKind = kind
@@ -409,28 +494,31 @@ func filterModelsByAllowedKinds(models []PlaygroundAppModel, allowed map[string]
 	return out
 }
 
-// mergeGlobalAndAppModels 合并全局库与应用层清单：按 model_id 去重，全局库优先。
+// mergeGlobalAndAppModels 合并全局库与应用层清单：按 model_id 去重（fork: 大小写不敏感，
+// GPT-Image-2 与 gpt-image-2 视为同一模型，保留一条），全局库优先。
 func mergeGlobalAndAppModels(global []PlaygroundAppModel, appModels []PlaygroundAppModel) []PlaygroundAppModel {
 	seen := make(map[string]struct{}, len(global)+len(appModels))
 	out := make([]PlaygroundAppModel, 0, len(global)+len(appModels))
 	for _, m := range global {
-		if m.ModelID == "" {
+		if strings.TrimSpace(m.ModelID) == "" {
 			continue
 		}
-		if _, dup := seen[m.ModelID]; dup {
+		key := strings.ToLower(m.ModelID)
+		if _, dup := seen[key]; dup {
 			continue
 		}
-		seen[m.ModelID] = struct{}{}
+		seen[key] = struct{}{}
 		out = append(out, m)
 	}
 	for _, m := range appModels {
 		if !m.Enabled || strings.TrimSpace(m.ModelID) == "" {
 			continue
 		}
-		if _, dup := seen[m.ModelID]; dup {
+		key := strings.ToLower(m.ModelID)
+		if _, dup := seen[key]; dup {
 			continue
 		}
-		seen[m.ModelID] = struct{}{}
+		seen[key] = struct{}{}
 		out = append(out, m)
 	}
 	return out
@@ -442,6 +530,16 @@ func (s *PlaygroundConfigService) ListGlobalConfig(ctx context.Context) ([]Playg
 	if err != nil {
 		return nil, err
 	}
+	// fork: 过滤指向已删除分组的僵尸绑定（历史遗留），管理端不再出现幽灵分组、
+	// 全量保存也不会再被 ErrPlaygroundGroupNotFound 整单拒绝。
+	existsCache := make(map[int64]bool)
+	kept := make([]PlaygroundGlobalConfig, 0, len(cfgs))
+	for i := range cfgs {
+		if s.groupExists(ctx, cfgs[i].GroupID, existsCache) {
+			kept = append(kept, cfgs[i])
+		}
+	}
+	cfgs = kept
 	groupNames, groupPlatforms := s.groupDisplayIndex(ctx)
 	views := make([]PlaygroundGlobalBindingView, 0, len(cfgs))
 	for i := range cfgs {
@@ -489,8 +587,10 @@ func (s *PlaygroundConfigService) SaveGlobalConfig(ctx context.Context, bindings
 	return s.repo.ReplaceGlobalConfigs(ctx, cfgs)
 }
 
-// normalizeModels 归一化模型清单：去空、去重、裁剪展示字段。
+// normalizeModels 归一化模型清单：去空、去重（fork: 大小写不敏感）、裁剪展示字段。
 // 注意：MonitorID 仅做引用透传，不在归一化时校验存在性（监控被删由 DB 置空）。
+// fork: kind 为空时用 InferModelKind 计算后落库（保存时自动填充），
+// 显式指定的 kind 优先，不覆盖。
 func (s *PlaygroundConfigService) normalizeModels(models []PlaygroundAppModel) []PlaygroundAppModel {
 	normalized := make([]PlaygroundAppModel, 0, len(models))
 	seen := make(map[string]struct{}, len(models))
@@ -499,10 +599,11 @@ func (s *PlaygroundConfigService) normalizeModels(models []PlaygroundAppModel) [
 		if m.ModelID == "" {
 			continue
 		}
-		if _, dup := seen[m.ModelID]; dup {
+		key := strings.ToLower(m.ModelID)
+		if _, dup := seen[key]; dup {
 			continue
 		}
-		seen[m.ModelID] = struct{}{}
+		seen[key] = struct{}{}
 		m.DisplayName = strings.TrimSpace(m.DisplayName)
 		m.PriceLabel = strings.TrimSpace(m.PriceLabel)
 		m.UnitHint = strings.TrimSpace(m.UnitHint)
@@ -511,6 +612,9 @@ func (s *PlaygroundConfigService) normalizeModels(models []PlaygroundAppModel) [
 			m.MonitorID = nil
 		}
 		m.ModelKind = normalizeModelKind(m.ModelKind)
+		if m.ModelKind == "" {
+			m.ModelKind = InferModelKind(m.ModelID)
+		}
 		normalized = append(normalized, m)
 	}
 	return normalized
@@ -566,4 +670,141 @@ func (s *PlaygroundConfigService) groupDisplayIndex(ctx context.Context) (map[in
 		platforms[groups[i].ID] = groups[i].Platform
 	}
 	return names, platforms
+}
+
+// enrichLongContextPricing 为对话模型解析长上下文计费阈值（long_context_* 三字段）。
+//
+// 与计费同源：resolver.Resolve（分组卡 → 渠道 → 目录 → 策略）；轻量路径不跑计费
+// 探针——无渠道区间时直接读目录/分组阶梯阈值（LongContextInputThreshold），
+// 有渠道区间时取首个 MinTokens>0 的边界。仅对 model_kind=chat 的模型富化
+// （image/video/audio 不走 token 阶梯计费）。resolver 缺省、分组查询失败、
+// 非 token 计费、未启用长上下文或无阈值时字段保持零值，前端据此不渲染提醒。
+// 注意：区间匹配为左开右闭 (min, max]（FindMatchingInterval），实际计费在
+// token > MinTokens 时才进档；下发按 inclusive=true 以 MinTokens 提醒，
+// 较真实跳档点提前 1 token，宁早勿晚。
+func (s *PlaygroundConfigService) enrichLongContextPricing(
+	ctx context.Context,
+	groupID int64,
+	models []PlaygroundAppModel,
+	groupCache map[int64]*Group,
+) {
+	if s.pricingResolver == nil || s.groupRepo == nil || len(models) == 0 {
+		return
+	}
+	group, ok := groupCache[groupID]
+	if !ok {
+		g, err := s.groupRepo.GetByID(ctx, groupID)
+		// 查询失败不阻塞下发：字段留零值，前端无提醒
+		if err != nil || g == nil {
+			groupCache[groupID] = nil
+			return
+		}
+		group = g
+		groupCache[groupID] = group
+	}
+	if group == nil {
+		return
+	}
+	gid := group.ID
+	for i := range models {
+		m := &models[i]
+		kind := m.ModelKind
+		if kind == "" {
+			kind = InferModelKind(m.ModelID)
+		}
+		if kind != ModelKindChat {
+			continue
+		}
+		resolved := s.pricingResolver.Resolve(ctx, PricingInput{Model: m.ModelID, Group: group, GroupID: &gid})
+		// 非 token 计费（按次/图片/视频）不适用长上下文阶梯
+		if resolved == nil || (resolved.Mode != "" && resolved.Mode != BillingModeToken) {
+			continue
+		}
+		if !resolved.longContextPricingEnabled {
+			continue
+		}
+		if len(resolved.Intervals) > 0 {
+			for j := range resolved.Intervals {
+				if resolved.Intervals[j].MinTokens > 0 {
+					m.LongContextPricingEnabled = true
+					m.LongContextThreshold = resolved.Intervals[j].MinTokens
+					m.LongContextThresholdInclusive = true
+					break
+				}
+			}
+			continue
+		}
+		pricing := s.pricingResolver.GetIntervalPricing(resolved, 1)
+		if pricing == nil || pricing.LongContextInputThreshold <= 0 {
+			continue
+		}
+		m.LongContextPricingEnabled = true
+		m.LongContextThreshold = pricing.LongContextInputThreshold
+		m.LongContextThresholdInclusive = pricing.LongContextThresholdInclusive
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 注入自检（管理端）：一眼核对三个工作台实际会收到的注入清单
+// ---------------------------------------------------------------------------
+
+// PlaygroundSelfCheckModel 注入自检的单模型视图（含运行时富化字段，不含任何密钥）。
+type PlaygroundSelfCheckModel struct {
+	ModelID                       string `json:"model_id"`
+	DisplayName                   string `json:"display_name"`
+	ModelKind                     string `json:"model_kind"`
+	MonitorStatus                 string `json:"monitor_status"`
+	LongContextPricingEnabled     bool   `json:"long_context_pricing_enabled"`
+	LongContextThreshold          int    `json:"long_context_threshold,omitempty"`
+	LongContextThresholdInclusive bool   `json:"long_context_threshold_inclusive,omitempty"`
+}
+
+// PlaygroundSelfCheckGroup 注入自检的单分组视图。
+type PlaygroundSelfCheckGroup struct {
+	GroupID   int64                      `json:"group_id"`
+	GroupName string                     `json:"group_name"`
+	Models    []PlaygroundSelfCheckModel `json:"models"`
+}
+
+// PlaygroundSelfCheckApp 注入自检的单应用视图。
+type PlaygroundSelfCheckApp struct {
+	App    string                     `json:"app"`
+	Groups []PlaygroundSelfCheckGroup `json:"groups"`
+}
+
+// SelfCheck 管理端「注入自检」：复用 ListEnabledApps 的运行时组装（类型分流、
+// 监控状态、长上下文阈值富化），返回三个工作台实际会收到的注入清单（不含任何
+// 密钥），供管理员一次看清注入结果，无需逐个打开工作台验证。
+func (s *PlaygroundConfigService) SelfCheck(ctx context.Context) ([]PlaygroundSelfCheckApp, error) {
+	apps, err := s.ListEnabledApps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	groupNames, _ := s.groupDisplayIndex(ctx)
+	out := make([]PlaygroundSelfCheckApp, 0, len(PlaygroundSupportedApps))
+	for _, app := range PlaygroundSupportedApps {
+		ra := apps[app]
+		groups := make([]PlaygroundSelfCheckGroup, 0, len(ra.Groups))
+		for _, g := range ra.Groups {
+			models := make([]PlaygroundSelfCheckModel, 0, len(g.Models))
+			for _, m := range g.Models {
+				models = append(models, PlaygroundSelfCheckModel{
+					ModelID:                       m.ModelID,
+					DisplayName:                   m.DisplayName,
+					ModelKind:                     m.ModelKind,
+					MonitorStatus:                 m.MonitorStatus,
+					LongContextPricingEnabled:     m.LongContextPricingEnabled,
+					LongContextThreshold:          m.LongContextThreshold,
+					LongContextThresholdInclusive: m.LongContextThresholdInclusive,
+				})
+			}
+			groups = append(groups, PlaygroundSelfCheckGroup{
+				GroupID:   g.GroupID,
+				GroupName: groupNames[g.GroupID],
+				Models:    models,
+			})
+		}
+		out = append(out, PlaygroundSelfCheckApp{App: app, Groups: groups})
+	}
+	return out, nil
 }

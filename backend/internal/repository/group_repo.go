@@ -953,7 +953,14 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 		return nil, err
 	}
 
-	// 5. Soft-delete group itself.
+	// 5. Detach API keys: 托管 key（Playground · 前缀）软删、用户自建 key 解绑，
+	//    与分组删除保持同一事务，避免留下指向已删分组的孤儿 key。
+	//    实现见 api_key_repo.go 的 detachAPIKeysFromGroup（ClearGroupIDByGroupID 同源）。
+	if _, _, err := detachAPIKeysFromGroup(ctx, exec, id); err != nil {
+		return nil, err
+	}
+
+	// 6. Soft-delete group itself.
 	if _, err := txClient.Group.Delete().Where(group.IDEQ(id)).Exec(ctx); err != nil {
 		return nil, err
 	}

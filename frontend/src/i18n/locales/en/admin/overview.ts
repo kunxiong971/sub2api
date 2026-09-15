@@ -561,6 +561,19 @@ export default {
       apiKeys: 'API Keys',
       userApiKeys: 'User API Keys',
       noApiKeys: 'This user has no API keys',
+      managedBadge: 'Managed',
+      filterAll: 'All',
+      filterManaged: 'Managed only',
+      filterOwn: 'User-created only',
+      deleteManaged: 'Delete',
+      deleteManagedConfirm: 'Delete the workspace-managed API key "{name}"? The workbench will recreate one on the next injection.',
+      managedKeyDeleted: 'Managed API key deleted',
+      deleteManagedFailed: 'Failed to delete managed API key',
+      cleanupOrphans: 'Clean up orphan managed keys',
+      cleanupOrphansConfirm: 'Remove all workspace-managed API keys whose group has been deleted? User-created keys are not affected.',
+      cleanupOrphansDone: 'Cleaned up {count} orphan managed key(s)',
+      cleanupOrphansNone: 'No orphan managed keys to clean up',
+      cleanupOrphansFailed: 'Failed to clean up orphan managed keys',
       group: 'Group',
       none: 'None',
       groupChangedSuccess: 'Group updated successfully',
@@ -981,6 +994,8 @@ export default {
         "Are you sure you want to delete '{name}'? All associated API keys will no longer belong to any group.",
       deleteConfirmSubscription:
         "Are you sure you want to delete subscription group '{name}'? This will invalidate all API keys bound to this subscription and delete all related subscription records. This action cannot be undone.",
+      deleteConfirmManagedKeys:
+        '{count} workspace-managed API key(s) will be removed as well.',
       subscription: {
         title: 'Subscription Settings',
         type: 'Billing Type',

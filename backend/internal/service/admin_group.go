@@ -1357,6 +1357,16 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 			}
 		}
 
+		// fork: 托管 key 受 (user_id, group_id) 部分唯一索引约束（每个用户在每个分组下最多一把），
+		// 目标分组已存在同一用户的托管 key 时直接拒绝改绑，避免撞唯一索引报 500。
+		if IsManagedPlaygroundKeyName(apiKey.Name) {
+			if repo, ok := s.apiKeyRepo.(ManagedAPIKeyRepository); ok {
+				if existing, lookupErr := repo.GetManagedByUserAndGroup(ctx, apiKey.UserID, *groupID); lookupErr == nil && existing != nil && existing.ID != apiKey.ID {
+					return nil, infraerrors.BadRequest("PLAYGROUND_KEY_GROUP_CONFLICT", "目标分组下已存在该用户的工作台托管密钥")
+				}
+			}
+		}
+
 		gid := *groupID
 		apiKey.GroupID = &gid
 		apiKey.Group = group
@@ -1439,6 +1449,57 @@ func (s *adminServiceImpl) AdminResetAPIKeyRateLimitUsage(ctx context.Context, k
 		_ = s.billingCacheService.InvalidateAPIKeyRateLimit(ctx, apiKey.ID)
 	}
 	return apiKey, nil
+}
+
+// DeleteManagedAPIKey 删除工作台托管 key（管理端专用入口）。
+//
+// 仅允许操作 Playground · 前缀的 key：用户自建 key 仍由用户自己管理（后台不可见即不可误删）。
+// 删除后失效认证缓存；工作台下一次注入（/keys/playground-config 或 /pgw）会自动重建一把。
+// 注意：/pgw 的进程内 key 缓存 TTL 为 5 分钟，删除后最迟 5 分钟内会自动重新解析到新 key。
+func (s *adminServiceImpl) DeleteManagedAPIKey(ctx context.Context, id int64) (*APIKey, error) {
+	apiKey, err := s.apiKeyRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !IsManagedPlaygroundKeyName(apiKey.Name) {
+		return nil, ErrPlaygroundKeyNotManaged
+	}
+	if err := s.apiKeyRepo.DeleteWithAudit(ctx, id); err != nil {
+		return nil, fmt.Errorf("delete managed api key: %w", err)
+	}
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+	}
+	return apiKey, nil
+}
+
+// CleanupOrphanPlaygroundKeys 清理孤儿托管 key：group_id 为空或指向已软删/不存在分组的
+// Playground 前缀 key。用于一次性清掉历史残留（分组删除尚未联动时期产生的孤儿），
+// 返回清理数量。
+func (s *adminServiceImpl) CleanupOrphanPlaygroundKeys(ctx context.Context) (int64, error) {
+	repo, ok := s.apiKeyRepo.(ManagedAPIKeyRepository)
+	if !ok {
+		return 0, fmt.Errorf("managed api key repository is unavailable")
+	}
+	keys, deleted, err := repo.SoftDeleteOrphanManagedKeys(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if s.authCacheInvalidator != nil {
+		for _, key := range keys {
+			s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, key)
+		}
+	}
+	return deleted, nil
+}
+
+// CountManagedGroupAPIKeys 统计分组下未删除的托管 key 数量（分组删除确认提示用）。
+func (s *adminServiceImpl) CountManagedGroupAPIKeys(ctx context.Context, groupID int64) (int64, error) {
+	repo, ok := s.apiKeyRepo.(ManagedAPIKeyRepository)
+	if !ok {
+		return 0, fmt.Errorf("managed api key repository is unavailable")
+	}
+	return repo.CountManagedKeysByGroupID(ctx, groupID)
 }
 
 // ReplaceUserGroup 替换用户的专属分组

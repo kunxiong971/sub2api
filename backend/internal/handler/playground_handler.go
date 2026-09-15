@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -40,6 +39,11 @@ type PlaygroundAppModelView struct {
 	SortOrder     int    `json:"sort_order"`
 	ModelKind     string `json:"model_kind,omitempty"`
 	MonitorStatus string `json:"monitor_status,omitempty"`
+	// 长上下文计费提醒（service 层按「分组×模型」运行时解析，非落库字段）：
+	// threshold=0 / enabled=false 时以 omitempty 省略，前端不渲染提醒。
+	LongContextPricingEnabled     bool `json:"long_context_pricing_enabled,omitempty"`
+	LongContextThreshold          int  `json:"long_context_threshold,omitempty"`
+	LongContextThresholdInclusive bool `json:"long_context_threshold_inclusive,omitempty"`
 }
 
 // PlaygroundAppGroupView 单个应用下某个绑定分组的注入配置：
@@ -106,30 +110,10 @@ func (h *APIKeyHandler) GetPlaygroundConfig(c *gin.Context) {
 		}
 	}
 
-	// 拉取用户全部 active key，按 group_id 建索引（List 默认 created_at desc，先命中即最新）
-	params := pagination.PaginationParams{
-		Page:      1,
-		PageSize:  1000,
-		SortBy:    "created_at",
-		SortOrder: "desc",
-	}
-	keys, _, err := h.apiKeyService.List(ctx, subject.UserID, params, service.APIKeyListFilters{
-		Status: service.StatusActive,
-	})
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	keyByGroup := make(map[int64]*service.APIKey, len(keys))
-	for i := range keys {
-		k := &keys[i]
-		if k.GroupID == nil {
-			continue
-		}
-		if _, exists := keyByGroup[*k.GroupID]; !exists {
-			keyByGroup[*k.GroupID] = k
-		}
-	}
+	// 本次请求内的托管 key 缓存：按分组按需查询/创建（见 ensurePlaygroundKey）。
+	// fork: 原先一次性拉取「最近 1000 条 active key」再内存过滤，key 数量多时会漏掉
+	// 目标分组的 key 而重复创建；现改为按 uid+gid 精确查询（服务层幂等）。
+	keyByGroup := make(map[int64]*service.APIKey, len(groups))
 
 	apps := make([]PlaygroundAppView, 0, len(managedApps))
 	groupOut := make([]PlaygroundGroupConfig, 0, len(groups))
@@ -159,14 +143,17 @@ func (h *APIKeyHandler) GetPlaygroundConfig(c *gin.Context) {
 			for _, m := range rg.Models {
 				modelIDs = append(modelIDs, m.ModelID)
 				modelViews = append(modelViews, PlaygroundAppModelView{
-					ModelID:       m.ModelID,
-					DisplayName:   m.DisplayName,
-					PriceLabel:    m.PriceLabel,
-					UnitHint:      m.UnitHint,
-					Description:   m.Description,
-					SortOrder:     m.SortOrder,
-					ModelKind:     m.ModelKind,
-					MonitorStatus: m.MonitorStatus,
+					ModelID:                       m.ModelID,
+					DisplayName:                   m.DisplayName,
+					PriceLabel:                    m.PriceLabel,
+					UnitHint:                      m.UnitHint,
+					Description:                   m.Description,
+					SortOrder:                     m.SortOrder,
+					ModelKind:                     m.ModelKind,
+					MonitorStatus:                 m.MonitorStatus,
+					LongContextPricingEnabled:     m.LongContextPricingEnabled,
+					LongContextThreshold:          m.LongContextThreshold,
+					LongContextThresholdInclusive: m.LongContextThresholdInclusive,
 				})
 			}
 			if len(modelIDs) == 0 {
@@ -222,7 +209,12 @@ func (h *APIKeyHandler) GetPlaygroundConfig(c *gin.Context) {
 	})
 }
 
-// ensurePlaygroundKey 返回用户在该分组下的 key，不存在则自动创建一把。
+// ensurePlaygroundKey 返回用户在该分组下的托管 key，不存在则自动创建一把。
+//
+// fork: 创建与解析统一收敛到 APIKeyService.EnsurePlaygroundKey ——
+// 按 uid+gid 精确查询 + singleflight + 唯一索引兜底（幂等），命名统一为
+// `Playground · <分组名>`；keyByGroup 仅作本次请求内的缓存，避免同一分组
+// 在多个应用下重复查询。
 func (h *APIKeyHandler) ensurePlaygroundKey(
 	ctx context.Context,
 	userID int64,
@@ -232,16 +224,12 @@ func (h *APIKeyHandler) ensurePlaygroundKey(
 	if key, ok := keyByGroup[group.ID]; ok {
 		return key, nil
 	}
-	// 该分组下没有 key，自动创建一把（归属当前用户，走现有计费/配额/风控体系）
-	created, err := h.apiKeyService.Create(ctx, userID, service.CreateAPIKeyRequest{
-		Name:    service.PlaygroundKeyNamePrefix + group.Name,
-		GroupID: &group.ID,
-	})
+	key, err := h.apiKeyService.EnsurePlaygroundKey(ctx, userID, group.ID, group.Name)
 	if err != nil {
 		return nil, err
 	}
-	keyByGroup[group.ID] = created
-	return created, nil
+	keyByGroup[group.ID] = key
+	return key, nil
 }
 
 // buildGroupConfig 组装单个分组的下发配置（含 /pgw 短时令牌）。

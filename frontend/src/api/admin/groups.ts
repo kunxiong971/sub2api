@@ -278,6 +278,16 @@ export async function getGroupApiKeys(
   return data
 }
 
+/**
+ * Count workspace-managed API keys (Playground · prefix) still bound to a group.
+ * Used by the delete confirm dialog to warn how many injected keys will be removed.
+ * @param id - Group ID
+ */
+export async function getManagedKeyCount(id: number): Promise<{ count: number }> {
+  const { data } = await apiClient.get<{ count: number }>(`/admin/groups/${id}/managed-key-count`)
+  return data
+}
+
 export async function listCompositeRoutes(id: number): Promise<CompositeModelRoute[]> {
   const { data } = await apiClient.get<CompositeModelRoute[]>(`/admin/groups/${id}/composite-routes`)
   return data
@@ -485,6 +495,7 @@ export const groupsAPI = {
   toggleStatus,
   getStats,
   getGroupApiKeys,
+  getManagedKeyCount,
   listCompositeRoutes,
   createCompositeRoute,
   updateCompositeRoute,

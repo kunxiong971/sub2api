@@ -9,7 +9,8 @@
  *
  * 新增分组无需改任何代码：配置接口实时返回最新分组列表。
  */
-import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
   getPlaygroundConfig,
@@ -24,6 +25,8 @@ import {
   PLAYGROUND_CONFIG_MESSAGE_TYPE,
   PLAYGROUND_CONFIG_ACK_TYPE,
   PLAYGROUND_THEME_MESSAGE_TYPE,
+  buildInjectedFingerprint,
+  filterModelsByAllowedKinds,
   normalizePlaygroundBase,
   resolvePlaygroundBase,
   withMonitorStatusTag,
@@ -37,6 +40,7 @@ import {
 // 保证 /chat /image /canvas 三个路由各自保活一个实例
 defineOptions({ name: 'PlaygroundView' })
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
@@ -53,8 +57,14 @@ const config = ref<PlaygroundConfig | null>(null)
 const selectedGroupId = ref<number | null>(null)
 const frameRef = ref<HTMLIFrameElement | null>(null)
 const iframeKey = ref(0)
+// fork: iframe 地址只在显式重建（render）时固定，避免周期刷新拿到新票据后
+// 响应式重算 :src 导致 iframe 被浏览器重新加载（lobe 会因此丢失当前会话）。
+const iframeSrc = ref('')
 
 const groups = computed<PlaygroundGroupConfig[]>(() => config.value?.groups ?? [])
+
+// 浏览器标签页标题由统一机制接管（router/title.ts + 路由 meta.title），
+// 这里不再手动写 document.title，避免与路由守卫互相覆盖。
 
 // 管理员在「工作台配置」中下发的当前应用注入规则；apps 为空表示后台尚未配置（回退旧行为）
 const appConfig = computed<PlaygroundAppConfig | null>(() => {
@@ -103,7 +113,12 @@ function buildInjectedGroup(
 ): PlaygroundInjectedGroup {
   // /pgw 代理模式：浏览器只持有 24h 短时令牌，真实 key 留在服务端
   const usePgw = appMeta.value.usePgwProxy && !!config.value?.pgw_base_url && !!group.pgw_token
-  const models: PlaygroundInjectedModel[] = (modelInfos ?? []).map((m) => ({
+  // fork: 前端最终防串——后端已按 kind 分流下发，这里再按应用口径过滤一道
+  // （chat→chat；image/canvas→chat+image），防旧缓存/异常数据把图片模型注进对话台
+  const models: PlaygroundInjectedModel[] = filterModelsByAllowedKinds(
+    appKey.value,
+    modelInfos ?? []
+  ).map((m) => ({
     model_id: m.model_id,
     // 状态标签 bake 进 display_name，三个工作台渲染模型名时统一显示。
     // 未配置展示名时以 model_id 兜底，避免展示名只剩状态标签（如「🟢 可用」）而丢失模型名。
@@ -112,7 +127,11 @@ function buildInjectedGroup(
     unit_hint: m.unit_hint,
     description: m.description,
     model_kind: m.model_kind ?? '',
-    monitor_status: m.monitor_status ?? ''
+    monitor_status: m.monitor_status ?? '',
+    // 长上下文计费提醒三字段：后端下发什么传什么（未下发时给中性缺省值）
+    long_context_pricing_enabled: m.long_context_pricing_enabled ?? false,
+    long_context_threshold: m.long_context_threshold ?? 0,
+    long_context_threshold_inclusive: m.long_context_threshold_inclusive ?? false
   }))
   return {
     groupName: group.name,
@@ -158,7 +177,11 @@ function buildInjectedConfig(): PlaygroundInjectedConfig | null {
     apiUrl: g.apiUrl,
     apiKey: g.apiKey,
     groupName: g.groupName,
-    models: group.models ?? [],
+    // fork: 回退模式同样按应用口径过滤模型白名单（与后端分流口径一致）
+    models: filterModelsByAllowedKinds(
+      appKey.value,
+      (group.models ?? []).map((id) => ({ model_id: id, model_kind: '' }))
+    ).map((m) => m.model_id),
     groups: [g]
   }
 }
@@ -221,6 +244,9 @@ function stopPostMessage() {
 }
 
 function startPostMessage() {
+  // fork: 仅 postMessage 注入的应用（对话/画布）需要注入循环；
+  // URL 参数应用（生图）从不 ACK，跑循环纯属浪费且无意义。
+  if (appMeta.value.injectMode !== 'postMessage') return
   stopPostMessage()
   const cfg = buildInjectedConfig()
   if (!cfg) return
@@ -270,6 +296,8 @@ async function loadConfig() {
 function render() {
   stopPostMessage()
   iframeKey.value++
+  // fork: 仅在显式重建时固定 iframe 地址（周期刷新不触碰，避免会话丢失）
+  iframeSrc.value = buildIframeSrc()
   if (selectedGroup.value && appMeta.value.injectMode === 'postMessage') {
     // iframe 加载需要时间，稍等后开始注入
     window.setTimeout(startPostMessage, 1200)
@@ -329,49 +357,89 @@ onMounted(() => {
   loadConfig()
   window.addEventListener('message', handleBridgeAck)
   watchPanelTheme()
+  // fork: 启动周期刷新（监控状态/模型清单变化最迟 2 分钟内进入已打开的工作台）
+  startRefreshTimer()
+  // fork: 记录本会话所加载的面板版本基线（后续周期比对发现新版本时提示）
+  void checkForPanelUpdate()
 })
-// fork: 注入相关配置的指纹（分组 / 模型展示名 / 价格 / 监控状态）。
-// URL 参数注入模式（生图工作台）无法像 postMessage 一样原地更新配置，
-// 仅当指纹确实变化时才重建 iframe，避免无谓重载丢失子应用内的编辑状态。
-function configFingerprint(cfg: PlaygroundConfig | null): string {
-  if (!cfg) return ''
-  const apps = (cfg.apps ?? [])
-    .map((a) => {
-      const groups = (a.groups ?? [])
-        .map((g) => {
-          const models = (g.models ?? [])
-            .map(
-              (m) =>
-                `${m.model_id}@${m.display_name ?? ''}@${m.price_label ?? ''}@${m.unit_hint ?? ''}@${m.model_kind ?? ''}@${m.monitor_status ?? ''}`
-            )
-            .join('|')
-          return `${g.group?.id}[${models}]`
-        })
-        .join(';')
-      return `${a.app}:${groups}`
-    })
-    .join('||')
-  return `${cfg.gateway_base_url ?? ''}|${cfg.pgw_base_url ?? ''}|${apps}`
+// ==================== 周期刷新（fork: 监控状态最迟 2 分钟内可见） ====================
+
+// fork: 周期刷新间隔 90s（叠加网络耗时，渠道监控状态变化最迟约 2 分钟内
+// 进入已打开的工作台），静默重新拉取注入配置并与上次注入内容比对指纹
+const REFRESH_INTERVAL_MS = 90_000
+
+let refreshTimer: number | null = null
+
+function startRefreshTimer() {
+  if (refreshTimer !== null) return
+  refreshTimer = window.setInterval(() => {
+    // 页面隐藏（后台标签页）时跳过拉取省资源，恢复可见后下个周期继续
+    if (document.hidden) return
+    void refreshConfigAndReinject()
+    // fork: 顺带探测面板是否有新版本发布（一次会话只提示一次）
+    void checkForPanelUpdate()
+  }, REFRESH_INTERVAL_MS)
 }
 
-// fork: keep-alive 场景下静默拉取最新配置并重注入（不整页重载）。
-// 渠道监控状态等为「下发时快照」，若切回后只重发旧配置，后台变更（模型状态标签、
-// 模型清单、价格标签）不会生效：
-// - postMessage 模式（lobe/画布）：原地重发即可让子应用刷新模型展示名；
-// - URL 参数模式（生图工作台）：配置有变化时才重建 iframe 以注入新参数。
+function stopRefreshTimer() {
+  if (refreshTimer !== null) {
+    window.clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+}
+
+// fork: 静默拉取最新配置并按需重注入。比较的是「当前应用实际注入产物」的指纹
+// （含 apiUrl/apiKey/分组名/模型展示名/价格/监控状态；见 config.buildInjectedFingerprint）。
+// 仅服务 postMessage 应用（对话/画布）：内容变化时原地重发 postMessage，子应用桥按
+// 内容指纹幂等，重复发无害，变化会重新应用。
+// fork: URL 参数注入（生图工作台）无法原地更新，且任何“请刷新”提示都会打断客户
+// 输入、清空已填内容——得不偿失，已按反馈移除；生图台以打开页面时的配置快照为准。
 async function refreshConfigAndReinject() {
+  if (appMeta.value.injectMode !== 'postMessage') return
   try {
+    const before = buildInjectedFingerprint(buildInjectedConfig())
     const data = await getPlaygroundConfig()
-    const changed = configFingerprint(config.value) !== configFingerprint(data)
     config.value = data
-    if (appMeta.value.injectMode === 'postMessage') {
-      startPostMessage()
-    } else if (changed) {
-      render()
-    }
+    const after = buildInjectedFingerprint(buildInjectedConfig())
+    if (before === after) return
+    startPostMessage()
   } catch {
     // 静默失败：保持现有配置，不影响已渲染的工作台
   }
+}
+
+// ==================== 面板新版本探测（fork） ====================
+// 面板页在部署后不会自行更新：iframe 的重载不会带动外层页面，导致用户可能整场
+// 会话都在跑旧代码（已发生过一次：修复了 90 秒重载的版本，但旧面板页仍持续重载）。
+// 这里每 90 秒轻量比对一次首页 ETag；发现新版本时给出一次性提示（由用户手动刷新，
+// 避免自动刷新打断正在进行的对话）。
+const updateAvailable = ref(false)
+let updateDismissed = false
+let baselineEtag: string | null = null
+
+async function checkForPanelUpdate() {
+  if (updateDismissed || updateAvailable.value) return
+  try {
+    const res = await fetch(window.location.pathname, { method: 'HEAD', cache: 'no-store' })
+    const etag = res.headers.get('etag') ?? ''
+    // 首次仅记录基线（本次会话所加载版本的标识）
+    if (baselineEtag === null) {
+      baselineEtag = etag
+      return
+    }
+    if (etag && baselineEtag !== etag) updateAvailable.value = true
+  } catch {
+    // 静默：探测失败不影响任何功能
+  }
+}
+
+function reloadPanel() {
+  window.location.reload()
+}
+
+function dismissUpdate() {
+  updateDismissed = true
+  updateAvailable.value = false
 }
 
 // fork: keep-alive 恢复（从其他页面切回）：iframe 仍在后台运行，无需重建。
@@ -382,8 +450,15 @@ onActivated(() => {
     broadcastTheme()
     void refreshConfigAndReinject()
   }
+  // fork: keep-alive 切回时恢复周期刷新（onDeactivated 中已停）
+  startRefreshTimer()
+})
+// fork: keep-alive 切走时停掉周期刷新，避免后台实例继续轮询
+onDeactivated(() => {
+  stopRefreshTimer()
 })
 onBeforeUnmount(() => {
+  stopRefreshTimer()
   stopPostMessage()
   window.removeEventListener('message', handleBridgeAck)
   themeObserver?.disconnect()
@@ -467,6 +542,27 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
+    <!-- fork: 面板新版本提示（一次性、可关闭；由用户决定何时刷新，避免打断对话） -->
+    <div
+      v-if="updateAvailable"
+      class="flex shrink-0 items-center justify-center gap-3 border-b border-blue-200 bg-blue-50 px-4 py-1.5 text-xs text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
+      role="status"
+    >
+      <span>{{ t('playground.update.available') }}</span>
+      <button
+        class="rounded-md bg-blue-500 px-2 py-0.5 font-medium text-white transition hover:bg-blue-600 dark:bg-blue-500 dark:hover:bg-blue-400"
+        @click="reloadPanel"
+      >
+        {{ t('playground.update.reload') }}
+      </button>
+      <button
+        class="rounded-md px-2 py-0.5 font-medium text-blue-600 transition hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-500/20"
+        @click="dismissUpdate"
+      >
+        {{ t('playground.update.dismiss') }}
+      </button>
+    </div>
+
     <!-- 内容区 -->
     <main class="relative min-h-0 flex-1">
       <!-- 加载中 -->
@@ -515,7 +611,7 @@ onBeforeUnmount(() => {
         v-else
         :key="iframeKey"
         ref="frameRef"
-        :src="buildIframeSrc()"
+        :src="iframeSrc"
         class="h-full w-full border-0"
         allow="clipboard-write; microphone; camera"
         @load="startPostMessage"

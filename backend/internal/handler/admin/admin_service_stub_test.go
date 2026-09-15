@@ -12,6 +12,9 @@ import (
 type stubAdminService struct {
 	users                               []service.User
 	apiKeys                             []service.APIKey
+	deletedManagedKeyIDs                []int64
+	cleanedOrphanKeys                   int64
+	managedGroupKeyCount                int64
 	groups                              []service.Group
 	accounts                            []service.Account
 	accountSchedulerScoreFilterAccounts []service.Account
@@ -208,8 +211,32 @@ func (s *stubAdminService) BatchUpdateLimits(ctx context.Context, userIDs []int6
 	return len(userIDs), nil
 }
 
-func (s *stubAdminService) GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string) ([]service.APIKey, int64, error) {
-	return s.apiKeys, int64(len(s.apiKeys)), nil
+func (s *stubAdminService) GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string, managed *bool) ([]service.APIKey, int64, error) {
+	keys := s.apiKeys
+	if managed != nil {
+		filtered := make([]service.APIKey, 0, len(keys))
+		for _, key := range keys {
+			isManaged := service.IsManagedPlaygroundKeyName(key.Name)
+			if isManaged == *managed {
+				filtered = append(filtered, key)
+			}
+		}
+		keys = filtered
+	}
+	return keys, int64(len(keys)), nil
+}
+
+func (s *stubAdminService) DeleteManagedAPIKey(ctx context.Context, id int64) (*service.APIKey, error) {
+	s.deletedManagedKeyIDs = append(s.deletedManagedKeyIDs, id)
+	return &service.APIKey{ID: id, Name: service.PlaygroundKeyNamePrefix + "stub"}, nil
+}
+
+func (s *stubAdminService) CleanupOrphanPlaygroundKeys(ctx context.Context) (int64, error) {
+	return s.cleanedOrphanKeys, nil
+}
+
+func (s *stubAdminService) CountManagedGroupAPIKeys(ctx context.Context, groupID int64) (int64, error) {
+	return s.managedGroupKeyCount, nil
 }
 
 func (s *stubAdminService) GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error) {

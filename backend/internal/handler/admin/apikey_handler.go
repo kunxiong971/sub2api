@@ -74,3 +74,37 @@ func (h *AdminAPIKeyHandler) UpdateGroup(c *gin.Context) {
 	}
 	response.Success(c, resp)
 }
+
+// Delete removes a workspace-managed API key (Playground · prefix only).
+// DELETE /api/v1/admin/api-keys/:id
+func (h *AdminAPIKeyHandler) Delete(c *gin.Context) {
+	keyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid API key ID")
+		return
+	}
+
+	apiKey, err := h.adminService.DeleteManagedAPIKey(c.Request.Context(), keyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{
+		"id":      apiKey.ID,
+		"name":    apiKey.Name,
+		"message": "Managed API key deleted",
+	})
+}
+
+// CleanupOrphans removes managed API keys whose group is missing or soft-deleted.
+// POST /api/v1/admin/api-keys/cleanup-orphans
+func (h *AdminAPIKeyHandler) CleanupOrphans(c *gin.Context) {
+	deleted, err := h.adminService.CleanupOrphanPlaygroundKeys(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{"deleted": deleted})
+}

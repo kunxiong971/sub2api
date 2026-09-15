@@ -7,15 +7,53 @@
         </div>
         <div><p class="font-medium text-gray-900 dark:text-white">{{ user.email }}</p><p class="text-sm text-gray-500 dark:text-dark-400">{{ user.username }}</p></div>
       </div>
+      <!-- fork(sub2api): 全部 / 仅托管 / 仅自建 筛选 + 孤儿托管密钥清理 -->
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex rounded-lg bg-gray-100 p-0.5 dark:bg-dark-700">
+          <button
+            v-for="option in filterOptions"
+            :key="String(option.value)"
+            @click="setFilter(option.value)"
+            :class="[
+              'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+              managedFilter === option.value
+                ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-600 dark:text-white'
+                : 'text-gray-500 hover:text-gray-800 dark:text-dark-400 dark:hover:text-gray-200'
+            ]"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+        <button
+          @click="cleanupConfirmVisible = true"
+          :disabled="cleaningOrphans"
+          class="ml-auto rounded-md px-2 py-1 text-xs text-gray-400 transition-colors hover:text-gray-700 disabled:opacity-50 dark:hover:text-gray-200"
+        >
+          {{ t('admin.users.cleanupOrphans') }}
+        </button>
+      </div>
+
       <div v-if="loading" class="flex justify-center py-8"><svg class="h-8 w-8 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
       <div v-else-if="apiKeys.length === 0" class="py-8 text-center"><p class="text-sm text-gray-500">{{ t('admin.users.noApiKeys') }}</p></div>
       <div v-else ref="scrollContainerRef" class="max-h-96 space-y-3 overflow-y-auto" @scroll="closeGroupSelector">
         <div v-for="key in apiKeys" :key="key.id" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
           <div class="flex items-start justify-between">
             <div class="min-w-0 flex-1">
-              <div class="mb-1 flex items-center gap-2"><span class="font-medium text-gray-900 dark:text-white">{{ key.name }}</span><span :class="['badge text-xs', key.status === 'active' ? 'badge-success' : 'badge-danger']">{{ key.status }}</span></div>
+              <div class="mb-1 flex flex-wrap items-center gap-2">
+                <span class="font-medium text-gray-900 dark:text-white">{{ key.name }}</span>
+                <span v-if="isManagedKey(key)" class="badge badge-primary text-xs">{{ t('admin.users.managedBadge') }}</span>
+                <span :class="['badge text-xs', key.status === 'active' ? 'badge-success' : 'badge-danger']">{{ key.status }}</span>
+              </div>
               <p class="truncate font-mono text-sm text-gray-500">{{ key.key.substring(0, 20) }}...{{ key.key.substring(key.key.length - 8) }}</p>
             </div>
+            <button
+              v-if="isManagedKey(key)"
+              @click="askDeleteManaged(key)"
+              :disabled="deletingKeyIds.has(key.id)"
+              class="ml-2 shrink-0 rounded-md px-2 py-1 text-xs text-red-500 transition-colors hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-500/10"
+            >
+              {{ t('admin.users.deleteManaged') }}
+            </button>
           </div>
           <div class="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
             <div class="flex items-center gap-1">
@@ -103,6 +141,26 @@
       </div>
     </div>
   </Teleport>
+
+  <!-- fork(sub2api): 删除托管 key 确认 -->
+  <ConfirmDialog
+    :show="deleteTarget !== null"
+    :title="t('admin.users.deleteManaged')"
+    :message="t('admin.users.deleteManagedConfirm', { name: deleteTarget?.name ?? '' })"
+    danger
+    @confirm="confirmDeleteManaged"
+    @cancel="deleteTarget = null"
+  />
+
+  <!-- fork(sub2api): 清理孤儿托管 key 确认 -->
+  <ConfirmDialog
+    :show="cleanupConfirmVisible"
+    :title="t('admin.users.cleanupOrphans')"
+    :message="t('admin.users.cleanupOrphansConfirm')"
+    danger
+    @confirm="confirmCleanupOrphans"
+    @cancel="cleanupConfirmVisible = false"
+  />
 </template>
 
 <script setup lang="ts">
@@ -113,8 +171,12 @@ import { adminAPI } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
 import type { AdminUser, AdminGroup, ApiKey } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+
+// fork(sub2api): 工作台托管密钥名称前缀（与后端 service.PlaygroundKeyNamePrefix 一致）
+const MANAGED_KEY_NAME_PREFIX = 'Playground · '
 
 const props = defineProps<{ show: boolean; user: AdminUser | null }>()
 const emit = defineEmits(['close'])
@@ -125,6 +187,12 @@ const apiKeys = ref<ApiKey[]>([])
 const allGroups = ref<AdminGroup[]>([])
 const loading = ref(false)
 const updatingKeyIds = ref(new Set<number>())
+// fork(sub2api): 托管密钥筛选/删除/孤儿清理
+const managedFilter = ref<boolean | undefined>(undefined)
+const deletingKeyIds = ref(new Set<number>())
+const deleteTarget = ref<ApiKey | null>(null)
+const cleaningOrphans = ref(false)
+const cleanupConfirmVisible = ref(false)
 const groupSelectorKeyId = ref<number | null>(null)
 const dropdownPosition = ref<{ top: number; left: number } | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
@@ -146,6 +214,7 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
 
 watch(() => props.show, (v) => {
   if (v && props.user) {
+    managedFilter.value = undefined
     load()
     loadGroups()
   } else {
@@ -158,12 +227,65 @@ const load = async () => {
   loading.value = true
   groupButtonRefs.value.clear()
   try {
-    const res = await adminAPI.users.getUserApiKeys(props.user.id)
+    const res = await adminAPI.users.getUserApiKeys(props.user.id, managedFilter.value)
     apiKeys.value = res.items || []
   } catch (error) {
     console.error('Failed to load API keys:', error)
   } finally {
     loading.value = false
+  }
+}
+
+// fork(sub2api): 全部 / 仅托管 / 仅自建
+const filterOptions = computed(() => [
+  { label: t('admin.users.filterAll'), value: undefined as boolean | undefined },
+  { label: t('admin.users.filterManaged'), value: true as boolean | undefined },
+  { label: t('admin.users.filterOwn'), value: false as boolean | undefined }
+])
+
+const isManagedKey = (key: ApiKey) => key.name?.startsWith(MANAGED_KEY_NAME_PREFIX) ?? false
+
+const setFilter = (value: boolean | undefined) => {
+  if (managedFilter.value === value) return
+  managedFilter.value = value
+  load()
+}
+
+const askDeleteManaged = (key: ApiKey) => {
+  deleteTarget.value = key
+}
+
+const confirmDeleteManaged = async () => {
+  const target = deleteTarget.value
+  if (!target) return
+  deleteTarget.value = null
+  deletingKeyIds.value.add(target.id)
+  try {
+    await adminAPI.apiKeys.deleteManagedKey(target.id)
+    apiKeys.value = apiKeys.value.filter((item) => item.id !== target.id)
+    appStore.showSuccess(t('admin.users.managedKeyDeleted'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.users.deleteManagedFailed'))
+  } finally {
+    deletingKeyIds.value.delete(target.id)
+  }
+}
+
+const confirmCleanupOrphans = async () => {
+  cleanupConfirmVisible.value = false
+  cleaningOrphans.value = true
+  try {
+    const res = await adminAPI.apiKeys.cleanupOrphanKeys()
+    if (res.deleted > 0) {
+      appStore.showSuccess(t('admin.users.cleanupOrphansDone', { count: res.deleted }))
+      await load()
+    } else {
+      appStore.showInfo(t('admin.users.cleanupOrphansNone'))
+    }
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.users.cleanupOrphansFailed'))
+  } finally {
+    cleaningOrphans.value = false
   }
 }
 
