@@ -125,9 +125,24 @@ docker compose up -d lobehub
 
 ## 六、待办
 
-1. **四仓库共 269 个提交尚未推送到 GitHub**（sub2api 领先 232、lobe-chat 17、生图台 10、画布 10）。
-   - 三个工作台仓库已配置 `mine` 远端指向自己的 fork（`kunxiong971/lobe-chat`、`.../gpt_image_playground`、`.../infinite-canvas`）；`origin` 仍是上游原作者仓库，**勿用 origin 推送**。
-   - 本机无 GitHub 凭据，需用户手动执行推送（见 `_fork-backup-2026-09-16/README.md`）。
-   - 已导出增量 bundle 存档：`e:/github/sub2AI/_fork-backup-2026-09-16/`（共 1.6M）。
+1. ~~四仓库共 269 个提交尚未推送到 GitHub~~ → **已于 2026-09-16 晚全部推送成功**（用户提供 GitHub PAT，已存入本机 Git Credential Manager；详见「七、GitHub 推送记录」）。
+   - 三个工作台仓库的 `mine` 远端指向自己的 fork（`kunxiong971/lobe-chat`、`.../gpt_image_playground`、`.../infinite-canvas`）；`origin` 仍是上游原作者仓库，**勿用 origin 推送**。
+   - 增量 bundle 存档（`e:/github/sub2AI/_fork-backup-2026-09-16/`）保留作异地备份。
 2. 建议浏览器侧回归：三工作台注入与出图、渠道监控「图片探活」（与上游同批修复同区域）、平台配额页面。
 3. 上游 `channel_monitor` 相关修复（Base URL 路径、自动刷新间隔、UTC 分桶）与本项目图片探活改动位于同一区域，后续合并时留意。
+
+---
+
+## 七、GitHub 推送记录（2026-09-16 晚）
+
+用户提供 GitHub PAT（推送后已存入本机 Git Credential Manager，后续推送全自动；token 到期/吊销后重新提供即可）。四个仓库全部推送成功，远端 ref 已逐一复核：
+
+| 仓库 | 推送目标（fork） | 分支 | 推送前领先 | 推送结果 | 远端新 HEAD |
+|---|---|---|---|---|---|
+| sub2api | `kunxiong971/sub2api`（origin） | `main` | 223 | ✅ `af5f53e8a..4f1f7a416` | `4f1f7a416` |
+| gpt_image_playground | `kunxiong971/gpt_image_playground`（mine） | `main` | 10 | ✅ `ccf824e..1867525` | `1867525` |
+| infinite-canvas | `kunxiong971/infinite-canvas`（mine） | `main` | 10 | ✅ `fda0df4..5bf6975` | `5bf6975` |
+| lobe-chat | `kunxiong971/lobe-chat`（mine） | `canary` | 17 | ✅ `2ba0d092d4..3c30659cf2` | `3c30659cf2` |
+
+- 安全处置：一次性推送脚本与 token 明文文件使用后已立即删除；凭据仅存于本机凭据管理器。
+- 本记录更新提交紧随其后推送（sub2api 第二次 `git push origin main`）。
