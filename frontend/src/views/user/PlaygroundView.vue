@@ -191,9 +191,30 @@ function buildIframeSrc(): string {
   // lobe 免登录：先经 bridge-login 以票据建立会话，再 302 回应用本体
   if (appMeta.value.injectMode === 'postMessage') {
     if (appMeta.value.autoLogin && config.value?.lobe_ticket) {
+      // fork(sub2api): 顺带把「首个 chat 模型 + 所属分组序号」带给对话台，让它
+      // 在服务端 agent 配置到达之前就能渲染正确的默认模型 —— 否则首屏会先显示
+      // lobe 内置的 DeepSeek V4 Flash，十几秒后才被纠正。
+      // ⚠️ 只带这两个短字段（长度固定约 50 字节，与渠道数/模型数无关），
+      // 完整配置仍走 postMessage，因此不会重蹈生图台 URL 膨胀触发 414 的覆辙。
+      let preferredQuery = ''
+      const cfgForDefault = buildInjectedConfig()
+      if (cfgForDefault?.groups?.length) {
+        for (let i = 0; i < cfgForDefault.groups.length; i += 1) {
+          const hit = (cfgForDefault.groups[i].models ?? []).find(
+            (m) => m.model_kind === 'chat'
+          )
+          if (hit) {
+            preferredQuery = new URLSearchParams({
+              sub2apiModel: hit.model_id,
+              sub2apiGroup: String(i)
+            }).toString()
+            break
+          }
+        }
+      }
       const params = new URLSearchParams({
         ticket: config.value.lobe_ticket,
-        callbackUrl: '/'
+        callbackUrl: preferredQuery ? `/?${preferredQuery}` : '/'
       })
       return `${base}api/sub2api/bridge-login?${params.toString()}`
     }
