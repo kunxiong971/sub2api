@@ -23,31 +23,36 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// fork(sub2api): 以下认证类错误的 message 全部改为中文——前端在展示错误时
+// 优先取后端返回的 message（见 frontend/src/api/client.ts 的响应拦截器与各视图
+// 的 err.response?.data?.message 取值），此前为英文硬编码，导致客户看到
+// "email already exists""invalid email or password" 等英文提示。
+// 错误码（code）保持不变，不影响任何按 code 判断的逻辑。
 var (
-	ErrInvalidCredentials           = infraerrors.Unauthorized("INVALID_CREDENTIALS", "invalid email or password")
-	ErrUserNotActive                = infraerrors.Forbidden("USER_NOT_ACTIVE", "user is not active")
-	ErrEmailExists                  = infraerrors.Conflict("EMAIL_EXISTS", "email already exists")
-	ErrEmailReserved                = infraerrors.BadRequest("EMAIL_RESERVED", "email is reserved")
-	ErrInvalidToken                 = infraerrors.Unauthorized("INVALID_TOKEN", "invalid token")
-	ErrTokenExpired                 = infraerrors.Unauthorized("TOKEN_EXPIRED", "token has expired")
-	ErrAccessTokenExpired           = infraerrors.Unauthorized("ACCESS_TOKEN_EXPIRED", "access token has expired")
-	ErrTokenTooLarge                = infraerrors.BadRequest("TOKEN_TOO_LARGE", "token too large")
-	ErrTokenRevoked                 = infraerrors.Unauthorized("TOKEN_REVOKED", "token has been revoked")
-	ErrRefreshTokenInvalid          = infraerrors.Unauthorized("REFRESH_TOKEN_INVALID", "invalid refresh token")
-	ErrRefreshTokenExpired          = infraerrors.Unauthorized("REFRESH_TOKEN_EXPIRED", "refresh token has expired")
-	ErrRefreshTokenReused           = infraerrors.Unauthorized("REFRESH_TOKEN_REUSED", "refresh token has been reused")
-	ErrEmailVerifyRequired          = infraerrors.BadRequest("EMAIL_VERIFY_REQUIRED", "email verification is required")
-	ErrEmailSuffixNotAllowed        = infraerrors.BadRequest("EMAIL_SUFFIX_NOT_ALLOWED", "email suffix is not allowed")
+	ErrInvalidCredentials           = infraerrors.Unauthorized("INVALID_CREDENTIALS", "邮箱或密码错误")
+	ErrUserNotActive                = infraerrors.Forbidden("USER_NOT_ACTIVE", "账号未激活，请联系管理员")
+	ErrEmailExists                  = infraerrors.Conflict("EMAIL_EXISTS", "该邮箱已被注册，请直接登录或使用其他邮箱")
+	ErrEmailReserved                = infraerrors.BadRequest("EMAIL_RESERVED", "该邮箱不允许注册")
+	ErrInvalidToken                 = infraerrors.Unauthorized("INVALID_TOKEN", "令牌无效")
+	ErrTokenExpired                 = infraerrors.Unauthorized("TOKEN_EXPIRED", "令牌已过期，请重新获取")
+	ErrAccessTokenExpired           = infraerrors.Unauthorized("ACCESS_TOKEN_EXPIRED", "登录已过期，请重新登录")
+	ErrTokenTooLarge                = infraerrors.BadRequest("TOKEN_TOO_LARGE", "令牌长度超出限制")
+	ErrTokenRevoked                 = infraerrors.Unauthorized("TOKEN_REVOKED", "登录凭证已失效，请重新登录")
+	ErrRefreshTokenInvalid          = infraerrors.Unauthorized("REFRESH_TOKEN_INVALID", "刷新令牌无效，请重新登录")
+	ErrRefreshTokenExpired          = infraerrors.Unauthorized("REFRESH_TOKEN_EXPIRED", "登录状态已过期，请重新登录")
+	ErrRefreshTokenReused           = infraerrors.Unauthorized("REFRESH_TOKEN_REUSED", "登录凭证已被使用，请重新登录")
+	ErrEmailVerifyRequired          = infraerrors.BadRequest("EMAIL_VERIFY_REQUIRED", "请先完成邮箱验证")
+	ErrEmailSuffixNotAllowed        = infraerrors.BadRequest("EMAIL_SUFFIX_NOT_ALLOWED", "该邮箱后缀不允许注册，请更换邮箱")
 	ErrEmailDomainRegistrationLimit = infraerrors.BadRequest(
 		"EMAIL_DOMAIN_REGISTRATION_LIMIT",
-		"this email domain cannot register another account; use a mainstream email or contact support to add the enterprise domain",
+		"该邮箱域名可注册的账号数已达上限，请使用常见邮箱，或联系管理员添加企业域名",
 	)
-	ErrRegDisabled             = infraerrors.Forbidden("REGISTRATION_DISABLED", "registration is currently disabled")
-	ErrServiceUnavailable      = infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "service temporarily unavailable")
-	ErrInvitationCodeRequired  = infraerrors.BadRequest("INVITATION_CODE_REQUIRED", "invitation code is required")
-	ErrInvitationCodeInvalid   = infraerrors.BadRequest("INVITATION_CODE_INVALID", "invalid or used invitation code")
-	ErrOAuthInvitationRequired = infraerrors.Forbidden("OAUTH_INVITATION_REQUIRED", "invitation code required to complete oauth registration")
-	ErrCaptchaProviderConflict = infraerrors.ServiceUnavailable("CAPTCHA_PROVIDER_CONFLICT", "multiple captcha providers are enabled")
+	ErrRegDisabled             = infraerrors.Forbidden("REGISTRATION_DISABLED", "注册功能当前已关闭")
+	ErrServiceUnavailable      = infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "服务暂时不可用，请稍后重试")
+	ErrInvitationCodeRequired  = infraerrors.BadRequest("INVITATION_CODE_REQUIRED", "请输入邀请码")
+	ErrInvitationCodeInvalid   = infraerrors.BadRequest("INVITATION_CODE_INVALID", "邀请码无效或已被使用")
+	ErrOAuthInvitationRequired = infraerrors.Forbidden("OAUTH_INVITATION_REQUIRED", "需要邀请码才能完成注册")
+	ErrCaptchaProviderConflict = infraerrors.ServiceUnavailable("CAPTCHA_PROVIDER_CONFLICT", "启用了多个验证码服务商，请联系管理员")
 )
 
 // maxTokenLength 限制 token 大小，避免超长 header 触发解析时的异常内存分配。
@@ -572,10 +577,10 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username string) (string, *User, error) {
 	email = strings.TrimSpace(email)
 	if email == "" || len(email) > 255 {
-		return "", nil, infraerrors.BadRequest("INVALID_EMAIL", "invalid email")
+		return "", nil, infraerrors.BadRequest("INVALID_EMAIL", "邮箱格式不正确")
 	}
 	if _, err := mail.ParseAddress(email); err != nil {
-		return "", nil, infraerrors.BadRequest("INVALID_EMAIL", "invalid email")
+		return "", nil, infraerrors.BadRequest("INVALID_EMAIL", "邮箱格式不正确")
 	}
 
 	username = strings.TrimSpace(username)
@@ -700,10 +705,10 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 
 	email = strings.TrimSpace(email)
 	if email == "" || len(email) > 255 {
-		return nil, nil, infraerrors.BadRequest("INVALID_EMAIL", "invalid email")
+		return nil, nil, infraerrors.BadRequest("INVALID_EMAIL", "邮箱格式不正确")
 	}
 	if _, err := mail.ParseAddress(email); err != nil {
-		return nil, nil, infraerrors.BadRequest("INVALID_EMAIL", "invalid email")
+		return nil, nil, infraerrors.BadRequest("INVALID_EMAIL", "邮箱格式不正确")
 	}
 
 	username = strings.TrimSpace(username)

@@ -1,5 +1,7 @@
 package service
 
+// fork(sub2api): 本文件面向用户的认证错误文案已中文化（错误码与类型保持不变，仅改 message，便于中文用户理解）。
+
 import (
 	"context"
 	"errors"
@@ -50,7 +52,7 @@ func (s *AuthService) BindEmailIdentity(
 	}
 	firstRealEmailBind := !hasBindableEmailIdentitySubject(currentUser.Email)
 	if firstRealEmailBind && len(password) < 6 {
-		return nil, infraerrors.BadRequest("PASSWORD_TOO_SHORT", "password must be at least 6 characters")
+		return nil, infraerrors.BadRequest("PASSWORD_TOO_SHORT", "密码长度至少 6 位")
 	}
 	if !firstRealEmailBind && !s.CheckPassword(password, currentUser.PasswordHash) {
 		return nil, ErrPasswordIncorrect
@@ -172,10 +174,10 @@ func (s *AuthService) ensureEmailIdentityAvailableForUser(
 func normalizeEmailForIdentityBinding(email string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(email))
 	if normalized == "" || len(normalized) > 255 {
-		return "", infraerrors.BadRequest("INVALID_EMAIL", "invalid email")
+		return "", infraerrors.BadRequest("INVALID_EMAIL", "邮箱格式不正确")
 	}
 	if _, err := mail.ParseAddress(normalized); err != nil {
-		return "", infraerrors.BadRequest("INVALID_EMAIL", "invalid email")
+		return "", infraerrors.BadRequest("INVALID_EMAIL", "邮箱格式不正确")
 	}
 	return normalized, nil
 }

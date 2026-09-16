@@ -1,5 +1,7 @@
 package handler
 
+// fork(sub2api): 本文件面向用户的认证错误文案已中文化（错误码与类型保持不变，仅改 message，便于中文用户理解）。
+
 import (
 	"context"
 	"log/slog"
@@ -127,7 +129,7 @@ func respondWithTokenPair(c *gin.Context, authService *service.AuthService, user
 		// 回退到只返回Access Token
 		token, tokenErr := authService.GenerateToken(c.Request.Context(), user)
 		if tokenErr != nil {
-			response.InternalError(c, "Failed to generate token")
+			response.InternalError(c, "生成令牌失败")
 			return
 		}
 		response.Success(c, AuthResponse{
@@ -153,14 +155,14 @@ func (h *AuthHandler) ensureBackendModeAllowsUser(ctx context.Context, user *ser
 	if h == nil || !h.isBackendModeEnabled(ctx) || user.IsAdmin() {
 		return nil
 	}
-	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "Backend mode is active. Only admin login is allowed.")
+	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "当前为后端模式，仅允许管理员登录")
 }
 
 func (h *AuthHandler) ensureBackendModeAllowsNewUserLogin(ctx context.Context) error {
 	if h == nil || !h.isBackendModeEnabled(ctx) {
 		return nil
 	}
-	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "Backend mode is active. Only admin login is allowed.")
+	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "当前为后端模式，仅允许管理员登录")
 }
 
 func (h *AuthHandler) isBackendModeEnabled(ctx context.Context) bool {
@@ -179,7 +181,7 @@ func (h *AuthHandler) isBackendModeEnabled(ctx context.Context) bool {
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "请求参数无效，请检查填写内容")
 		return
 	}
 
@@ -212,7 +214,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
 	var req SendVerifyCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "请求参数无效，请检查填写内容")
 		return
 	}
 
@@ -239,7 +241,7 @@ func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "请求参数无效，请检查填写内容")
 		return
 	}
 
@@ -266,7 +268,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		// Create a temporary login session for 2FA
 		tempToken, err := h.totpService.CreateLoginSession(c.Request.Context(), user.ID, user.Email)
 		if err != nil {
-			response.InternalError(c, "Failed to create 2FA session")
+			response.InternalError(c, "创建两步验证会话失败")
 			return
 		}
 
@@ -301,7 +303,7 @@ type Login2FARequest struct {
 func (h *AuthHandler) Login2FA(c *gin.Context) {
 	var req Login2FARequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "请求参数无效，请检查填写内容")
 		return
 	}
 
@@ -319,7 +321,7 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		slog.Debug("login_2fa_session_invalid",
 			"temp_token_prefix", tokenPrefix,
 			"error", err)
-		response.BadRequest(c, "Invalid or expired 2FA session")
+		response.BadRequest(c, "两步验证会话无效或已过期，请重新登录")
 		return
 	}
 
@@ -424,7 +426,7 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
-		response.Unauthorized(c, "User not authenticated")
+		response.Unauthorized(c, "用户未登录")
 		return
 	}
 
@@ -483,7 +485,7 @@ func (h *AuthHandler) ValidatePromoCode(c *gin.Context) {
 
 	var req ValidatePromoCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "请求参数无效，请检查填写内容")
 		return
 	}
 
@@ -550,7 +552,7 @@ func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
 
 	var req ValidateInvitationCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "请求参数无效，请检查填写内容")
 		return
 	}
 
@@ -604,7 +606,7 @@ type ForgotPasswordResponse struct {
 func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 	var req ForgotPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "请求参数无效，请检查填写内容")
 		return
 	}
 
@@ -617,7 +619,7 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 	frontendBaseURL := strings.TrimSpace(h.settingSvc.GetFrontendURL(c.Request.Context()))
 	if frontendBaseURL == "" {
 		slog.Error("frontend_url not configured in settings or config; cannot build password reset link")
-		response.InternalError(c, "Password reset is not configured")
+		response.InternalError(c, "密码重置功能未配置，请联系管理员")
 		return
 	}
 
@@ -629,7 +631,7 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 	}
 
 	response.Success(c, ForgotPasswordResponse{
-		Message: "If your email is registered, you will receive a password reset link shortly.",
+		Message: "如果该邮箱已注册，稍后您将收到一封密码重置邮件，请查收。",
 	})
 }
 
@@ -650,7 +652,7 @@ type ResetPasswordResponse struct {
 func (h *AuthHandler) ResetPassword(c *gin.Context) {
 	var req ResetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "请求参数无效，请检查填写内容")
 		return
 	}
 
@@ -661,7 +663,7 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 	}
 
 	response.Success(c, ResetPasswordResponse{
-		Message: "Your password has been reset successfully. You can now log in with your new password.",
+		Message: "密码已重置成功，请使用新密码登录。",
 	})
 }
 
@@ -685,7 +687,7 @@ type RefreshTokenResponse struct {
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req RefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "请求参数无效，请检查填写内容")
 		return
 	}
 
@@ -697,7 +699,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 
 	// Backend mode: block non-admin token refresh
 	if h.settingSvc.IsBackendModeEnabled(c.Request.Context()) && result.UserRole != "admin" {
-		response.Forbidden(c, "Backend mode is active. Only admin login is allowed.")
+		response.Forbidden(c, "当前为后端模式，仅允许管理员登录")
 		return
 	}
 
@@ -751,13 +753,13 @@ type RevokeAllSessionsResponse struct {
 func (h *AuthHandler) RevokeAllSessions(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
-		response.Unauthorized(c, "User not authenticated")
+		response.Unauthorized(c, "用户未登录")
 		return
 	}
 
 	if err := h.authService.RevokeAllUserTokens(c.Request.Context(), subject.UserID); err != nil {
 		slog.Error("failed to revoke all sessions", "user_id", subject.UserID, "error", err)
-		response.InternalError(c, "Failed to revoke sessions")
+		response.InternalError(c, "注销会话失败")
 		return
 	}
 

@@ -1,5 +1,7 @@
 package service
 
+// fork(sub2api): 本文件面向用户的认证错误文案已中文化（错误码与类型保持不变，仅改 message，便于中文用户理解）。
+
 import (
 	"context"
 	"errors"
@@ -61,7 +63,7 @@ func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
 
 	providerType := normalizeOAuthSignupSource(input.ProviderType)
 	if providerType != "github" && providerType != "google" && providerType != "oidc" {
-		return nil, nil, infraerrors.BadRequest("OAUTH_PROVIDER_INVALID", "oauth provider is invalid")
+		return nil, nil, infraerrors.BadRequest("OAUTH_PROVIDER_INVALID", "第三方登录方式无效")
 	}
 	providerKey := strings.TrimSpace(input.ProviderKey)
 	if providerKey == "" {
@@ -72,15 +74,15 @@ func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
 		return nil, nil, infraerrors.BadRequest("OAUTH_SUBJECT_MISSING", "oauth subject is missing")
 	}
 	if !input.EmailVerified {
-		return nil, nil, infraerrors.Forbidden("OAUTH_EMAIL_NOT_VERIFIED", "oauth email is not verified")
+		return nil, nil, infraerrors.Forbidden("OAUTH_EMAIL_NOT_VERIFIED", "第三方账号的邮箱未验证")
 	}
 
 	email := strings.TrimSpace(strings.ToLower(input.Email))
 	if email == "" || len(email) > 255 {
-		return nil, nil, infraerrors.BadRequest("INVALID_EMAIL", "invalid email")
+		return nil, nil, infraerrors.BadRequest("INVALID_EMAIL", "邮箱格式不正确")
 	}
 	if _, err := mail.ParseAddress(email); err != nil {
-		return nil, nil, infraerrors.BadRequest("INVALID_EMAIL", "invalid email")
+		return nil, nil, infraerrors.BadRequest("INVALID_EMAIL", "邮箱格式不正确")
 	}
 	if isReservedEmail(email) {
 		return nil, nil, ErrEmailReserved
@@ -94,7 +96,7 @@ func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
 		return nil, nil, err
 	}
 	if identityUser != nil && !strings.EqualFold(strings.TrimSpace(identityUser.Email), email) {
-		return nil, nil, infraerrors.Conflict("AUTH_IDENTITY_EMAIL_MISMATCH", "oauth identity belongs to a different email")
+		return nil, nil, infraerrors.Conflict("AUTH_IDENTITY_EMAIL_MISMATCH", "该第三方账号已绑定其他邮箱")
 	}
 
 	user := identityUser
@@ -271,7 +273,7 @@ func (s *AuthService) ensureEmailOAuthIdentity(ctx context.Context, userID int64
 	}
 	if identity != nil {
 		if identity.UserID != userID {
-			return infraerrors.Conflict("AUTH_IDENTITY_OWNERSHIP_CONFLICT", "auth identity already belongs to another user")
+			return infraerrors.Conflict("AUTH_IDENTITY_OWNERSHIP_CONFLICT", "该第三方账号已被其他用户绑定")
 		}
 		_, err = s.entClient.AuthIdentity.UpdateOneID(identity.ID).
 			SetMetadata(metadata).
